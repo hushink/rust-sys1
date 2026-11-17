@@ -54,4 +54,4 @@ pub use sys1_protocol::{
 pub use sys1_hub::{Hub, HubConfig, ModelRef, ModelSource, PulledModel};
 
 #[cfg(feature = "laya")]
-pub use sys1_laya::ConfidenceMode;
+pub use sys1_laya::{ConfidenceMode, LayaFactory, LayaModel, LayaOptions, LayaRouter};

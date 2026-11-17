@@ -35,6 +35,24 @@ let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+原来的直接 checkpoint API 保持不变，可与 engine 并存：
+
+```rust
+use std::path::Path;
+use sys1::{DecisionModel, LayaModel, LayaOptions, Questions, State};
+
+let model = LayaModel::load_dir(Path::new("/path/to/laya"), LayaOptions::default())?;
+let state = State::text("I was charged twice. Please refund me today.");
+let questions = Questions::new()
+    .choice("tone", [("angry", "Hostile"), ("calm", "Neutral")])
+    .noul("billing", "Is this about billing?");
+
+let output = model.predict(&state, &questions)?;
+let tone = output.answers.choice("tone")?;
+let billing = output.answers.noul("billing")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ## 进程内引擎
 
 - `EngineOptions` 按 `hub`（缓存、端点、凭据）、`registry`（LRU/keep-alive）与
@@ -60,10 +78,11 @@ let billing = output.answers.noul("billing")?;
 - `sys1::laya` — `sys1-laya` 全部（feature `laya`）
 - 扁平别名：`DecisionModel`、`ModelResolver`、`ModelRegistry`、`ModelManifest`、
   `Questions`、`Answers`、`State`、`Question`、`Answer`、`EngineOptions`、
-  `EngineError`、`InferenceEngine`、`ModelOptions`、`ConfidenceMode`、`Hub`、
-  `HubConfig`。
+  `EngineError`、`InferenceEngine`、`ModelOptions`、`ConfidenceMode`、
+  `LayaModel`、`LayaOptions`、`LayaFactory`、`LayaRouter`、`Hub`、`HubConfig`。
 
-crate 根模块有意不导出 Laya 前缀类型；需要具体实现时使用 `sys1::laya`。
+Engine 是增量能力：原有的 `LayaModel` / `LayaOptions` 直接 API 继续可用，
+Laya 类型也可通过 `sys1::laya` 访问。
 
 ## 测试
 

@@ -36,6 +36,25 @@ let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+The direct checkpoint API is unchanged and remains available alongside the
+engine:
+
+```rust
+use std::path::Path;
+use sys1::{DecisionModel, LayaModel, LayaOptions, Questions, State};
+
+let model = LayaModel::load_dir(Path::new("/path/to/laya"), LayaOptions::default())?;
+let state = State::text("I was charged twice. Please refund me today.");
+let questions = Questions::new()
+    .choice("tone", [("angry", "Hostile"), ("calm", "Neutral")])
+    .noul("billing", "Is this about billing?");
+
+let output = model.predict(&state, &questions)?;
+let tone = output.answers.choice("tone")?;
+let billing = output.answers.noul("billing")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ## In-process engine
 
 - `EngineOptions` groups `hub` (cache, endpoints, credentials), `registry`
@@ -65,10 +84,11 @@ Lower-level access is still available through `sys1::core`, `sys1::protocol`,
 - Flat aliases: `DecisionModel`, `ModelResolver`, `ModelRegistry`,
   `ModelManifest`, `Questions`, `Answers`, `State`, `Question`, `Answer`,
   `EngineOptions`, `EngineError`, `InferenceEngine`, `ModelOptions`,
-  `ConfidenceMode`, `Hub`, `HubConfig`.
+  `ConfidenceMode`, `LayaModel`, `LayaOptions`, `LayaFactory`, `LayaRouter`,
+  `Hub`, `HubConfig`.
 
-Laya-prefixed types are intentionally not exported from the crate root; use
-`sys1::laya` when you need the concrete implementation.
+The engine is additive: the existing `LayaModel` / `LayaOptions` direct API
+keeps working, and Laya types are also available under `sys1::laya`.
 
 ## Test
 

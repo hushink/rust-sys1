@@ -190,7 +190,26 @@ let billing = output.answers.noul("billing")?;
 返回官方 wire response。Engine 实现了 `ModelResolver`，因此也可作为服务端
 `/api/models` 运行时管理的 resolver。
 
-umbrella 根模块不再导出 Laya 前缀类型；Laya 相关辅助仍位于 `sys1::laya`。
+原来的直接 checkpoint API 保持不变：
+
+```rust
+use std::path::Path;
+use sys1::{DecisionModel, LayaModel, LayaOptions, Questions, State};
+
+let model = LayaModel::load_dir(Path::new("/path/to/laya"), LayaOptions::default())?;
+let state = State::text("I was charged twice. Please refund me today.");
+let questions = Questions::new()
+    .choice("tone", [("angry", "Hostile"), ("calm", "Neutral")])
+    .noul("billing", "Is this about billing?");
+
+let output = model.predict(&state, &questions)?;
+let tone = output.answers.choice("tone")?;
+let billing = output.answers.noul("billing")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`LayaModel`、`LayaOptions`、`LayaFactory`、`LayaRouter` 仍从 crate 根导出；
+`InferenceEngine` 是新增的增强层。
 
 ## 兼容性说明
 

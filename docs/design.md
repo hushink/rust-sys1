@@ -83,7 +83,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 命名边界：Laya 前缀类型/函数只定义在 `sys1-laya`。其他 crate 使用通用名
   （如 `HubModelResolver`、`make_model_options`、`CheckpointFactory` 导入别名），
   checkpoint 布局辅助（`local_checkpoint_manifest`、`register_checkpoint_bundle`）
-  也放在 `sys1-laya`；umbrella 根不导出 Laya 前缀类型。
+  也放在 `sys1-laya`；umbrella 只再导出 `sys1-laya` 的既有类型以保持原有调用方式，
+  不新定义 Laya 前缀 API。
 
 ## 4. HTTP API
 

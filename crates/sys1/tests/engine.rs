@@ -1,4 +1,19 @@
-use sys1::{EngineOptions, InferenceEngine, Questions, State};
+use std::path::Path;
+use sys1::{
+    DecisionModel, EngineOptions, InferenceEngine, LayaFactory, LayaModel, LayaOptions, LayaRouter,
+    Questions, State,
+};
+
+#[test]
+fn direct_checkpoint_api_is_still_exported() {
+    fn assert_decision_model<T: DecisionModel>() {}
+    assert_decision_model::<LayaModel>();
+
+    let _options = LayaOptions::default();
+    let _factory = LayaFactory::new();
+    let _ = std::any::type_name::<LayaRouter>();
+    let _ = Path::new("/path/to/laya");
+}
 
 #[test]
 #[ignore = "requires SYS1_LAYA_TEST_ROOT pointing at a Laya checkpoint"]

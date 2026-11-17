@@ -200,8 +200,26 @@ confidence, attention). `engine.add("hf:...")` / `add_as` register references,
 response. The engine implements `ModelResolver`, so it can also back the
 server's `/api/models` runtime management.
 
-The umbrella root exports no Laya-prefixed types; Laya-specific helpers remain
-under `sys1::laya`.
+The original direct checkpoint API is unchanged:
+
+```rust
+use std::path::Path;
+use sys1::{DecisionModel, LayaModel, LayaOptions, Questions, State};
+
+let model = LayaModel::load_dir(Path::new("/path/to/laya"), LayaOptions::default())?;
+let state = State::text("I was charged twice. Please refund me today.");
+let questions = Questions::new()
+    .choice("tone", [("angry", "Hostile"), ("calm", "Neutral")])
+    .noul("billing", "Is this about billing?");
+
+let output = model.predict(&state, &questions)?;
+let tone = output.answers.choice("tone")?;
+let billing = output.answers.noul("billing")?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`LayaModel`, `LayaOptions`, `LayaFactory`, and `LayaRouter` remain re-exported
+at the crate root; `InferenceEngine` is an additive convenience layer.
 
 ## Compatibility notes
 
