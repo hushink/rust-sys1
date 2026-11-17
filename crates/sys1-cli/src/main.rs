@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sys1_core::{
-    DecisionModel, DevicePreference, ModelManifest, ModelRegistry, ModelResolver, Questions,
-    RegistryConfig,
+    DecisionModel, DevicePreference, LongContextOptions, ModelManifest, ModelRegistry,
+    ModelResolver, Questions, RegistryConfig,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
@@ -201,6 +201,18 @@ struct RunArgs {
     /// Router-wide language hint, e.g. en or ro.
     #[arg(long, value_name = "CODE")]
     laya_lang_guess: Option<String>,
+    /// Scan a state longer than the context window in overlapping windows.
+    #[arg(long)]
+    long: bool,
+    /// State tokens per window (default: the checkpoint's state budget).
+    #[arg(long, value_name = "TOKENS")]
+    window: Option<usize>,
+    /// Token step between windows (default: half the window).
+    #[arg(long, value_name = "TOKENS")]
+    stride: Option<usize>,
+    /// Maximum windows per forward pass.
+    #[arg(long, value_name = "WINDOWS")]
+    long_batch: Option<usize>,
     /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
     #[arg(long)]
     tf32: bool,
@@ -571,13 +583,54 @@ fn run_command(
     } else {
         Arc::new(CheckpointModel::load_dir(&pulled.directory, options)?)
     };
-    let output = model.predict(&state, &questions)?;
+    let output = if args.long {
+        model.predict_long(
+            &state,
+            &questions,
+            LongContextOptions {
+                window: args.window,
+                stride: args.stride,
+                batch_size: args.long_batch,
+            },
+        )?
+    } else {
+        model.predict(&state, &questions)?
+    };
+    let sys1_core::DecisionOutput {
+        answers,
+        usage,
+        windows,
+        scored_windows,
+        ..
+    } = output;
     let response = SystemOneResponse {
         model: pulled.manifest.name,
-        answers: output.answers.into_map(),
-        usage: output.usage,
+        answers: answers.into_map(),
+        usage,
     };
-    println!("{}", serde_json::to_string_pretty(&response)?);
+    let mut value = serde_json::to_value(&response)?;
+    if args.long {
+        let object = value.as_object_mut().expect("response is an object");
+        if let Some(answers) = object
+            .get_mut("answers")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            for (id, answer) in answers.iter_mut() {
+                if let Some(window) = windows.get(id)
+                    && let Some(answer) = answer.as_object_mut()
+                {
+                    answer.insert("window".to_owned(), serde_json::to_value(window)?);
+                }
+            }
+        }
+        if let Some(usage) = object
+            .get_mut("usage")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            usage.insert("windows".to_owned(), serde_json::json!(scored_windows));
+        }
+    }
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 

@@ -4,7 +4,9 @@ use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use sys1_core::{DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
+use sys1_core::{
+    DecisionModel, DecisionOutput, LongContextOptions, ModelError, Prediction, Questions,
+};
 use sys1_protocol::State;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
@@ -289,6 +291,17 @@ impl DecisionModel for LayaRouter {
     fn predict(&self, state: &State, questions: &Questions) -> Result<DecisionOutput, ModelError> {
         let decision = self.route(state, questions)?;
         self.load(decision.model)?.predict(state, questions)
+    }
+
+    fn predict_long(
+        &self,
+        state: &State,
+        questions: &Questions,
+        options: LongContextOptions,
+    ) -> Result<DecisionOutput, ModelError> {
+        let decision = self.route(state, questions)?;
+        self.load(decision.model)?
+            .predict_long(state, questions, options)
     }
 
     fn supports_cross_request_batching(&self) -> bool {

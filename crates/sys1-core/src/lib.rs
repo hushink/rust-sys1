@@ -15,7 +15,8 @@ pub use device::{DeviceError, DeviceParseError, DevicePreference, ResolvedDevice
 pub use error::{AnswerError, Error};
 pub use manifest::{ManifestError, ModelFile, ModelManifest};
 pub use model::{
-    DecisionModel, DecisionOutput, ModelError, ModelFactory, ModelResolver, Prediction,
+    DecisionModel, DecisionOutput, LongContextOptions, ModelError, ModelFactory, ModelResolver,
+    Prediction, WindowAttribution,
 };
 pub use questions::Questions;
 pub use registry::{ModelOrigin, ModelRegistry, RegistryConfig};

@@ -1,4 +1,7 @@
-use crate::{DecisionOutput, Error, ManifestError, ModelFactory, ModelManifest, Questions};
+use crate::{
+    DecisionOutput, Error, LongContextOptions, ManifestError, ModelFactory, ModelManifest,
+    Questions,
+};
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -314,6 +317,30 @@ impl ModelRegistry {
     ) -> Result<DecisionOutput, Error> {
         self.predict_inner(name, state, questions)
             .map(|(_, output)| output)
+    }
+
+    /// Validate, resolve, load, and scan a long state, returning typed
+    /// answers plus window attribution.
+    pub fn predict_long_output(
+        &self,
+        name: &str,
+        state: &State,
+        questions: &Questions,
+        options: LongContextOptions,
+    ) -> Result<DecisionOutput, Error> {
+        questions.validate()?;
+        self.maintenance();
+
+        let (canonical, _) = self.resolve(name).ok_or_else(|| Error::ModelNotFound {
+            model: name.to_owned(),
+        })?;
+        let model = self.acquire(&canonical)?;
+        model
+            .predict_long(state, questions, options)
+            .map_err(|source| Error::Model {
+                model: canonical,
+                source,
+            })
     }
 
     /// Validate, resolve, load, and run a prediction, returning the official

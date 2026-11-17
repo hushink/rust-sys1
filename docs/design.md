@@ -19,7 +19,7 @@
 - 不做 Jev 远程代理（Jev 只作为兼容目标）。
 - 不做 per-model runner 子进程、MCP、动态插件 ABI。
 - 不发布 crates.io；先内部库 + 二进制。
-- 不做 long context 扫描、abstention、parallel option layout（v1.1）；act head 已实现。
+- 不做 abstention、parallel option layout（v1.1）；act head 与 long-context 扫描已实现。
 - v1 不强制 ONNX/TensorRT；ONNX 作为可选 `sys1-ort` + `sys1-laya/onnx` 路径实现，TensorRT 通过 ORT TensorRT EP。
 - 与 `candle-backend` / `candle-laya` / `jev-sdk-rs` 无代码或依赖关联。
 
@@ -152,7 +152,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 支持 english / multilingual / typed-decisions 三个 checkpoint；`laya-latest` 由 Router 自动选择，另提供显式别名。
 - 支持 choice / score / noul、batch、confidence、语言温度、Router。
 - 实现状态：三个 checkpoint、batch、TypeSafe/Laya confidence、官方 parity Router 已落地；routing golden 159/159 对齐。
-- 暂缓：long context 扫描、`min_confidence`/abstention、parallel option layout。
+- 暂缓：`min_confidence`/abstention、parallel option layout。
 - 数值对齐：官方 Laya golden vectors（`laya-rust/tests/golden`）作为 oracle；标签完全一致，probabilities/score 容差 1e-4。
 - 渲染细节：temperature 按 `qtype:bucket` 选择并 clamp 到 `[0.5, 5.0]`；softmax 在 f32；`round4` 复现 CPython half-even。
 - `confidence`：`/v1/*` 默认使用 TypeSafe/ollaya 归一化公式 `(K·p_max-1)/(K-1)`；配置可切换 Laya 原生熵置信度；Laya 原生值后续通过扩展端点/头暴露。
@@ -208,7 +208,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 ## 10. 路线图
 
 - **v1**：candle Laya、官方 API、hub、CLI、进程内接口、CUDA/Metal feature、doctor。
-- **v1.1**：long context、abstention、parallel layout；ORT backend；ONNX 模型（含 act head）；TensorRT EP。ORT 路径使用 `ort 2.0.0-rc.15` + `load-dynamic`，构建期不下载运行时；API 17 已在 ONNX Runtime 1.17 上验证。TensorRT 需要本机 TensorRT SDK；candle 不能直接承载 TensorRT。本地 ONNX 导出器已实现并通过 golden 对齐；上游官方 ONNX 产物仍待补。
+- **v1.1**：abstention、parallel layout；ORT backend；ONNX 模型（含 act head）；TensorRT EP。ORT 路径使用 `ort 2.0.0-rc.15` + `load-dynamic`，构建期不下载运行时；API 17 已在 ONNX Runtime 1.17 上验证。TensorRT 需要本机 TensorRT SDK；candle 不能直接承载 TensorRT。本地 ONNX 导出器已实现并通过 golden 对齐；上游官方 ONNX 产物仍待补。
 - **后续**：Kev 或其他 family；动态插件评估（仅在设计稳定后）。
 
 ### 实现状态（2026-11-17）
@@ -233,8 +233,9 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致，含 `action.act_probability`；multilingual 特殊 token 已修正。
 - 路由与 act head：官方 routing probe 159/159 用例的 model、workflow、reason 与 detection 完全一致；act head 在 candle 后端由 checkpoint 的 `act_head.*` 自动启用并写入 `DecisionOutput.actions`（官方 wire 不包含）。ONNX 导出暂未包含 act head。细节见 ADR 0013。
+- 长上下文扫描：`DecisionModel::predict_long`、`LongContextOptions`、`WindowAttribution` 与 `sys1 run --long` 已实现；默认窗口受问题 state 余量限制、50% 重叠，`noul` 取最大、`choice`/`score` 取最自信窗口。英文 checkpoint 与官方 `predict_long` 的答案、act、窗口归因与 usage 对齐。细节见 ADR 0014。
 - 真实上游：`sys1-hub` 的 `SYS1_LIVE_HUB=1` 测试可解析真实 HF 与 ModelScope manifest；受限网络可用 `HF_ENDPOINT=https://hf-mirror.com`。
-- 待补：zstd、long/abstention/parallel、ONNX act head/ORT/TensorRT、GPU 实机 CI。
+- 待补：zstd、abstention/parallel、ONNX act head/ORT/TensorRT、GPU 实机 CI。
 
 ## 11. 已确认与遗留
 
@@ -248,7 +249,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 
 1. Laya 权重许可证：再分发前确认；v1 不内置权重。
 2. Laya 原生 confidence 的 HTTP 暴露方式：独立 `/api/*` 端点或响应头（v1.1）。
-3. zstd 请求压缩、ONNX/ORT/TensorRT、ONNX act head、long/abstention/parallel；GPU 实机 CI。
+3. zstd 请求压缩、ONNX/ORT/TensorRT、ONNX act head、abstention/parallel；GPU 实机 CI。
 
 ## 12. 决策索引
 

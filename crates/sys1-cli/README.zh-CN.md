@@ -261,7 +261,16 @@ cargo build --release -p sys1-cli --features ort-tensorrt
 
 ```bash
 sys1 run local:/path/to/laya-multilingual --input request.json
+
+# 扫描超过 checkpoint 上下文窗口的长文档
+sys1 run local:/path/to/laya-multilingual --input long.json \
+  --long --window 512 --stride 256
 ```
+
+启用 `--long` 后，每个答案会增加 `window` 对象（`index`、`token_start`、
+`token_end`、`count`），`usage.windows` 报告实际打分的窗口数。能放进一个窗口的
+state 会走普通单次调用。`--stride` 不能超过有效窗口；`--long-batch` 限制每次
+前向的窗口数。
 
 ## 压测
 

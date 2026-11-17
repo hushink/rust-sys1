@@ -7,6 +7,8 @@ rust-sys1 的核心 trait、manifest、模型注册表、typed 进程内 API 与
 ## 包含内容
 
 - `DecisionModel`：同步 `predict(&State, &Questions) -> DecisionOutput`。
+  可选的 `predict_long` 用重叠窗口扫描长 state；见 `LongContextOptions` 与
+  `WindowAttribution`。
 - `ModelFactory`：从 `ModelManifest` 懒加载模型。
 - `ModelResolver`：可选的运行时引用解析，把外部引用变成可加载的 manifest。
 - `ModelRegistry`：名称/别名解析、懒加载、LRU、`keep_alive`、卸载，以及运行时
@@ -63,6 +65,9 @@ let response = registry.predict("laya-latest", &state, &questions)?;
   官方 `SystemOneResponse`。
 - `DecisionOutput::actions` 携带可选的逐问题动作概率（例如 Laya 的
   `action.act_probability`）。它是 typed 扩展，官方 wire 响应不会包含。
+- `DecisionOutput::windows` / `scored_windows` 携带长上下文归因：每个答案的
+  决定 token 窗口，以及实际打分的窗口数（`predict` 为 `0`，单窗口为 `1`）。
+  `predict_long_output` 对长调用复用同样的校验与注册表路径。
 - `ModelResolver` 不属于注册表：调用方把引用解析成 manifest、注册它们，并提供
   能加载这些 manifest 的 factory。CLI 用它实现服务运行期间从 hub 添加模型。
 

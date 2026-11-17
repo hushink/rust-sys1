@@ -282,7 +282,17 @@ prints compiled features and the resolved device.
 
 ```bash
 sys1 run local:/path/to/laya-multilingual --input request.json
+
+# Scan a document longer than the checkpoint's context window
+sys1 run local:/path/to/laya-multilingual --input long.json \
+  --long --window 512 --stride 256
 ```
+
+With `--long`, each answer gains a `window` object (`index`, `token_start`,
+`token_end`, `count`) and `usage.windows` reports how many windows were
+scored. A state that fits one window takes the ordinary single-call path.
+`--stride` must not exceed the effective window; `--long-batch` bounds windows
+per forward pass.
 
 ## Benchmark
 

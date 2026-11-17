@@ -1,12 +1,15 @@
 use crate::LayaOptions;
 use crate::calibration::ConfidenceMode;
 use crate::config::LayaConfig;
+use crate::long;
 use crate::onnx_config::OnnxFileConfig;
 use crate::prepare::{Item, PreparedRequest, deduplicate, prepare_request};
 use crate::response::build_response;
 use crate::tokenizer::LayaTokenizer;
 use std::path::Path;
-use sys1_core::{DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
+use sys1_core::{
+    DecisionModel, DecisionOutput, LongContextOptions, ModelError, Prediction, Questions,
+};
 use sys1_ort::{ScoringInputs, ScoringSession, SessionConfig};
 use sys1_protocol::State;
 
@@ -93,6 +96,29 @@ impl LayaOnnxModel {
             .collect())
     }
 
+    fn predict_prepared(
+        &self,
+        prepared: Vec<PreparedRequest>,
+    ) -> Vec<Result<DecisionOutput, ModelError>> {
+        match self.forward(&prepared) {
+            Ok(outputs) => {
+                let mut outputs = outputs.into_iter().map(|logits| (logits, None));
+                prepared
+                    .into_iter()
+                    .map(|request| {
+                        Ok(build_response(
+                            &self.config,
+                            self.confidence_mode,
+                            request,
+                            &mut outputs,
+                        ))
+                    })
+                    .collect()
+            }
+            Err(error) => prepared.iter().map(|_| Err(error.clone())).collect(),
+        }
+    }
+
     fn score_items(&self, items: &[&Item]) -> Result<Vec<Vec<f32>>, ModelError> {
         let batch = items.len();
         let seq = items.iter().map(|item| item.ids.len()).max().unwrap_or(0);
@@ -159,6 +185,31 @@ impl DecisionModel for LayaOnnxModel {
             .expect("one prediction result")
     }
 
+    fn predict_long(
+        &self,
+        state: &State,
+        questions: &Questions,
+        options: LongContextOptions,
+    ) -> Result<DecisionOutput, ModelError> {
+        let plan = long::plan(&self.tokenizer, &self.config, state, questions, options)?;
+        if plan.single {
+            let mut output = self.predict(state, questions)?;
+            output.scored_windows = 1;
+            return Ok(output);
+        }
+        tracing::debug!(
+            window = plan.window,
+            stride = plan.stride,
+            windows = plan.windows.len(),
+            "scanning long state"
+        );
+        let prepared = long::prepare_windows(&self.tokenizer, &self.config, &plan, questions)?;
+        let outputs = long::score_windows(prepared, options.batch_size, |batch| {
+            self.predict_prepared(batch)
+        })?;
+        long::aggregate(outputs, questions, &plan.windows)
+    }
+
     fn predict_batch(
         &self,
         requests: &[Prediction<'_>],
@@ -184,23 +235,12 @@ impl DecisionModel for LayaOnnxModel {
         }
 
         if !prepared.is_empty() {
-            match self.forward(&prepared) {
-                Ok(outputs) => {
-                    let mut outputs = outputs.into_iter().map(|logits| (logits, None));
-                    for (request, slot) in prepared.into_iter().zip(prepared_slots) {
-                        slots[slot] = Some(Ok(build_response(
-                            &self.config,
-                            self.confidence_mode,
-                            request,
-                            &mut outputs,
-                        )));
-                    }
-                }
-                Err(error) => {
-                    for slot in prepared_slots {
-                        slots[slot] = Some(Err(error.clone()));
-                    }
-                }
+            for (result, slot) in self
+                .predict_prepared(prepared)
+                .into_iter()
+                .zip(prepared_slots)
+            {
+                slots[slot] = Some(result);
             }
         }
 

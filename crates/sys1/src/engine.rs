@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use sys1_core::{
-    DecisionOutput, Error as RegistryError, ManifestError, ModelError, ModelManifest,
-    ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
+    DecisionOutput, Error as RegistryError, LongContextOptions, ManifestError, ModelError,
+    ModelManifest, ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
 };
 use sys1_hub::{CacheResidency, Hub, HubConfig, HubError, ModelRef};
 use sys1_laya::{
@@ -190,6 +190,20 @@ impl InferenceEngine {
         questions: &Questions,
     ) -> Result<DecisionOutput, EngineError> {
         Ok(self.registry.predict_output(model, state, questions)?)
+    }
+
+    /// Scan a long state in overlapping windows and return typed answers with
+    /// window attribution.
+    pub fn predict_long(
+        &self,
+        model: &str,
+        state: &State,
+        questions: &Questions,
+        options: LongContextOptions,
+    ) -> Result<DecisionOutput, EngineError> {
+        Ok(self
+            .registry
+            .predict_long_output(model, state, questions, options)?)
     }
 
     /// Run one prediction and return the official response shape.

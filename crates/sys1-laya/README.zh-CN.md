@@ -149,6 +149,40 @@ let urgency = output.answers.score("urgency")?;
 `TypeSafe` confidence 为 `(K * p_max - 1) / (K - 1)`；`LayaNative` 为
 `1 - H(p) / ln(K)`。`noul` 按官方形状不携带 confidence。
 
+## 长上下文扫描
+
+`DecisionModel::predict_long` 只对 state tokenize 一次，切成重叠的 token 窗口，
+用共享前向打分，再按问题聚合。`LayaModel`、`LayaOnnxModel` 与 `LayaRouter`
+均实现该方法；官方 wire API 保持不变。
+
+```rust
+use sys1_core::LongContextOptions;
+
+let output = model.predict_long(
+    &State::text(document),
+    &questions,
+    LongContextOptions {
+        window: Some(512),   // 默认 max(64, max_len - head_max_len - 8)
+        stride: Some(256),   // 默认有效窗口的一半
+        batch_size: None,    // 每次前向的窗口数
+    },
+)?;
+let deciding = output.window("urgency").expect("窗口归因");
+assert_eq!(deciding.count, output.scored_windows);
+```
+
+- `noul` 取各窗口 P(true) 的最大值。
+- `choice` / `score` 取最自信窗口的完整答案，避免中性窗口多数票淹没局部信号。
+- 每个答案的窗口记录 `index`、`token_start`、`token_end` 与 `count`；
+  `scored_windows` 对应官方 `usage.windows`。
+- state 能放进一个窗口时直接走普通 `predict`（`scored_windows = 1`，无逐答案窗口）。
+- `usage.input_tokens` 汇总所有窗口（含重叠部分）。返回的置信度属于决定窗口，
+  不是整篇文档的校准值。
+
+英文 checkpoint 已在相同 state、问题、window 与 stride 下与官方
+`predict_long` 对比：答案、`action.act_probability`、窗口归因与
+`usage.input_tokens` 一致。
+
 ## Router
 
 `LayaRouter::new(root, options)` 需要 Laya 仓库根目录（含 `english/`、

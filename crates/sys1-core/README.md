@@ -8,6 +8,8 @@ selection for rust-sys1.
 ## What is included
 
 - `DecisionModel`: synchronous `predict(&State, &Questions) -> DecisionOutput`.
+  The optional `predict_long` scans a state in overlapping windows; see
+  `LongContextOptions` and `WindowAttribution`.
 - `ModelFactory`: lazy loading from a `ModelManifest`.
 - `ModelResolver`: optional runtime resolution of references into loadable manifests.
 - `ModelRegistry`: name/alias resolution, lazy loading, LRU, `keep_alive`, model unload,
@@ -67,6 +69,10 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `DecisionOutput::actions` carries optional per-question action probabilities
   (for example Laya's `action.act_probability`). It is a typed extension; the
   official wire response does not include it.
+- `DecisionOutput::windows` / `scored_windows` carry long-context attribution:
+  the deciding token window per answer and the number of windows scored
+  (`0` for `predict`, `1` for a state that fit one window). `predict_long_output`
+  runs the same validation and registry path for long calls.
 - A `ModelResolver` is not part of the registry: callers resolve a reference to
   manifests, register them, and pass a factory that can load them. The CLI uses
   this to add hub models while the server is running.

@@ -37,32 +37,46 @@ pub(crate) fn prepare_request(
     state: &State,
     questions: &Questions,
 ) -> Result<PreparedRequest, ModelError> {
+    let state_ids = state_token_ids(tokenizer, state)?;
+    prepare_request_with_state_ids(tokenizer, config, &state_ids, questions)
+}
+
+/// Tokenize a state once, before it is split into long-context windows.
+pub(crate) fn state_token_ids(
+    tokenizer: &LayaTokenizer,
+    state: &State,
+) -> Result<Vec<u32>, ModelError> {
+    let state_text = sanitize_masks(&render_state(state));
+    tokenizer.encode(&state_text).map_err(ModelError::inference)
+}
+
+/// Prepare a request from state token ids that were already tokenized (and,
+/// for long-context scanning, sliced into windows).
+pub(crate) fn prepare_request_with_state_ids(
+    tokenizer: &LayaTokenizer,
+    config: &LayaConfig,
+    state_ids: &[u32],
+    questions: &Questions,
+) -> Result<PreparedRequest, ModelError> {
     if questions.is_empty() {
         return Err(ModelError::invalid_request("questions must not be empty"));
     }
 
-    let state_text = sanitize_masks(&render_state(state));
-    let state_ids = tokenizer
-        .encode(&state_text)
-        .map_err(ModelError::inference)?;
-
     let mut items = Vec::with_capacity(questions.len());
     for (id, question) in questions.iter() {
-        items.push(prepare_question(
-            tokenizer, config, id, question, &state_ids,
-        )?);
+        let prepared = prepare_question(id, question)?;
+        let (ids, markers) = build_sequence(tokenizer, config, state_ids, &prepared)?;
+        items.push(Item {
+            question: prepared,
+            ids,
+            markers,
+        });
     }
     Ok(PreparedRequest { items })
 }
 
-fn prepare_question(
-    tokenizer: &LayaTokenizer,
-    config: &LayaConfig,
-    id: &str,
-    question: &Question,
-    state_ids: &[u32],
-) -> Result<Item, ModelError> {
-    let (prepared, sequence) = match question {
+fn prepare_question(id: &str, question: &Question) -> Result<PreparedQuestion, ModelError> {
+    match question {
         Question::Choice(choice) => {
             let instructions = instructions_or_id(choice.instructions.as_ref(), id);
             let labels = choice.criteria.keys().cloned().collect::<Vec<_>>();
@@ -71,16 +85,14 @@ fn prepare_question(
                 .iter()
                 .map(|(label, description)| option_text(label, description))
                 .collect::<Vec<_>>();
-            let prepared = PreparedQuestion {
+            Ok(PreparedQuestion {
                 id: id.to_owned(),
                 kind: 0,
                 instructions,
                 criteria: Criteria::Choice,
                 labels,
                 options,
-            };
-            let sequence = build_sequence(tokenizer, config, state_ids, &prepared)?;
-            (prepared, sequence)
+            })
         }
         Question::Score(score) => {
             if score.criteria.is_empty() {
@@ -103,49 +115,48 @@ fn prepare_question(
                 .enumerate()
                 .map(|(index, value)| format!("level {index}: {}", render_content(value)))
                 .collect::<Vec<_>>();
-            let prepared = PreparedQuestion {
+            Ok(PreparedQuestion {
                 id: id.to_owned(),
                 kind: 1,
                 instructions,
                 criteria: Criteria::Score(score.criteria.clone()),
                 labels,
                 options,
-            };
-            let sequence = build_sequence(tokenizer, config, state_ids, &prepared)?;
-            (prepared, sequence)
+            })
         }
         Question::Noul(noul) => {
             let instructions = instructions_or_id(noul.instructions.as_ref(), id);
             let (false_text, true_text) = noul_texts(noul.criteria.as_ref());
-            let prepared = PreparedQuestion {
+            Ok(PreparedQuestion {
                 id: id.to_owned(),
                 kind: 2,
                 instructions,
                 criteria: Criteria::Noul,
                 labels: vec!["false".to_owned(), "true".to_owned()],
                 options: vec![false_text, true_text],
-            };
-            let sequence = build_sequence(tokenizer, config, state_ids, &prepared)?;
-            (prepared, sequence)
+            })
         }
-        Question::Box(_) => {
-            return Err(ModelError::unsupported(format!(
-                "question {id:?}: Laya does not support box questions"
-            )));
-        }
-    };
-
-    Ok(Item {
-        question: prepared,
-        ids: sequence.0,
-        markers: sequence.1,
-    })
+        Question::Box(_) => Err(ModelError::unsupported(format!(
+            "question {id:?}: Laya does not support box questions"
+        ))),
+    }
 }
 
-fn build_sequence(
+/// How many state tokens a question leaves inside `max_len`.
+pub(crate) fn state_room(
     tokenizer: &LayaTokenizer,
     config: &LayaConfig,
-    state_ids: &[u32],
+    id: &str,
+    question: &Question,
+) -> Result<usize, ModelError> {
+    let prepared = prepare_question(id, question)?;
+    let (head, _) = build_head(tokenizer, config, &prepared)?;
+    Ok(config.max_len.saturating_sub(head.len() + 1))
+}
+
+fn build_head(
+    tokenizer: &LayaTokenizer,
+    config: &LayaConfig,
     question: &PreparedQuestion,
 ) -> Result<(Vec<u32>, Vec<usize>), ModelError> {
     let mut head = tokenizer
@@ -189,6 +200,16 @@ fn build_sequence(
         ids.extend(option);
     }
     ids.push(tokenizer.sep_id);
+    Ok((ids, markers))
+}
+
+fn build_sequence(
+    tokenizer: &LayaTokenizer,
+    config: &LayaConfig,
+    state_ids: &[u32],
+    question: &PreparedQuestion,
+) -> Result<(Vec<u32>, Vec<usize>), ModelError> {
+    let (mut ids, mut markers) = build_head(tokenizer, config, question)?;
 
     let room = config.max_len.saturating_sub(ids.len() + 1);
     if state_ids.len() > room {

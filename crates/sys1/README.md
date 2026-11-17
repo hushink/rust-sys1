@@ -91,9 +91,12 @@ contract and `onnx.json` options. `sys1::ort` re-exports the raw
 - `load` / `unload` / `loaded_models` / `is_loaded` control residency;
   `models` / `model` inspect the catalog; `remove` unloads and unregisters.
 - `predict` returns typed `DecisionOutput`; `systemone` returns the official
-  `SystemOneResponse`; `predict_batch` runs the model's native batch path.
+  `SystemOneResponse`; `predict_batch` runs the model's native batch path;
+  `predict_long` scans a long state in overlapping windows.
   `DecisionOutput::actions` exposes optional per-question action probabilities
   (Laya's `act_probability`); the official wire response omits them.
+  `DecisionOutput::windows` / `scored_windows` expose the deciding token window
+  and window count.
 - The engine implements `ModelResolver`, so it can be passed to
   `sys1-server`'s `router_with_resolver` for runtime `/api/models` support.
 

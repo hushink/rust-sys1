@@ -1,5 +1,6 @@
 use crate::calibration::ConfidenceMode;
 use crate::config::{LayaConfig, ModernBertConfig};
+use crate::long;
 use crate::modernbert::Encoder;
 use crate::prepare::{Item, PreparedRequest, deduplicate, prepare_request};
 use crate::response::build_response;
@@ -8,7 +9,9 @@ use crate::tokenizer::LayaTokenizer;
 use candle_core::{D, DType, Device, IndexOp, Tensor};
 use candle_nn::{Embedding, LayerNorm, Linear, VarBuilder, embedding, layer_norm};
 use std::path::Path;
-use sys1_core::{DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
+use sys1_core::{
+    DecisionModel, DecisionOutput, LongContextOptions, ModelError, Prediction, Questions,
+};
 use sys1_protocol::State;
 
 /// One question's logits and, when the checkpoint has one, the act-head
@@ -525,12 +528,62 @@ impl LayaModel {
     }
 }
 
+impl LayaModel {
+    fn predict_prepared(
+        &self,
+        prepared: Vec<PreparedRequest>,
+    ) -> Vec<Result<DecisionOutput, ModelError>> {
+        match self.forward(&prepared) {
+            Ok(outputs) => {
+                let mut outputs = outputs.into_iter();
+                prepared
+                    .into_iter()
+                    .map(|request| {
+                        Ok(build_response(
+                            &self.config,
+                            self.confidence_mode,
+                            request,
+                            &mut outputs,
+                        ))
+                    })
+                    .collect()
+            }
+            Err(error) => prepared.iter().map(|_| Err(error.clone())).collect(),
+        }
+    }
+}
+
 impl DecisionModel for LayaModel {
     fn predict(&self, state: &State, questions: &Questions) -> Result<DecisionOutput, ModelError> {
         self.predict_batch(&[Prediction::new(state, questions)])
             .into_iter()
             .next()
             .expect("one prediction result")
+    }
+
+    fn predict_long(
+        &self,
+        state: &State,
+        questions: &Questions,
+        options: LongContextOptions,
+    ) -> Result<DecisionOutput, ModelError> {
+        let plan = long::plan(&self.tokenizer, &self.config, state, questions, options)?;
+        if plan.single {
+            let mut output = self.predict(state, questions)?;
+            output.scored_windows = 1;
+            return Ok(output);
+        }
+        tracing::debug!(
+            window = plan.window,
+            stride = plan.stride,
+            windows = plan.windows.len(),
+            "scanning long state"
+        );
+        let prepared = long::prepare_windows(&self.tokenizer, &self.config, &plan, questions)?;
+        let outputs = long::score_windows(prepared, options.batch_size, |batch| {
+            self.predict_prepared(batch)
+        })?;
+        long::aggregate(outputs, questions, &plan.windows)
     }
 
     fn supports_cross_request_batching(&self) -> bool {
@@ -564,23 +617,12 @@ impl DecisionModel for LayaModel {
         }
 
         if !prepared.is_empty() {
-            match self.forward(&prepared) {
-                Ok(outputs) => {
-                    let mut outputs = outputs.into_iter();
-                    for (request, slot) in prepared.into_iter().zip(prepared_slots) {
-                        slots[slot] = Some(Ok(build_response(
-                            &self.config,
-                            self.confidence_mode,
-                            request,
-                            &mut outputs,
-                        )));
-                    }
-                }
-                Err(error) => {
-                    for slot in prepared_slots {
-                        slots[slot] = Some(Err(error.clone()));
-                    }
-                }
+            for (result, slot) in self
+                .predict_prepared(prepared)
+                .into_iter()
+                .zip(prepared_slots)
+            {
+                slots[slot] = Some(result);
             }
         }
 

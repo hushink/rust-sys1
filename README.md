@@ -320,9 +320,10 @@ let billing = output.answers.noul("billing")?;
 (LRU/keep-alive), and `model` (`ModelOptions`: device, dtype, context length,
 confidence, attention). `engine.add("hf:...")` / `add_as` register references,
 `load` / `unload` control residency, `models` / `model` inspect the catalog,
-`predict_batch` runs a native batch, and `systemone` returns the official wire
-response. The engine implements `ModelResolver`, so it can also back the
-server's `/api/models` runtime management.
+`predict_batch` runs a native batch, `predict_long` scans a long state in
+overlapping windows with typed window attribution, and `systemone` returns the
+official wire response. The engine implements `ModelResolver`, so it can also
+back the server's `/api/models` runtime management.
 
 The original direct checkpoint API is unchanged:
 
@@ -352,7 +353,9 @@ at the crate root; `InferenceEngine` is an additive convenience layer.
 - `box` questions and image `assets` are parsed but Laya returns `422 unsupported`; missing
   `TypeSafe-Danger-Zone-Images: true` returns `400`.
 - Request limit is 32 MiB. gzip is supported; zstd currently returns `415` in this build.
-- Long state returns `400` with `max_tokens_exceeded`; it is never silently truncated.
+- Long state returns `400` with `max_tokens_exceeded` from `/v1` and ordinary
+  `predict`; typed `predict_long` / `sys1 run --long` scan it in overlapping
+  windows instead.
 - `/v1/*` defaults to TypeSafe/ollaya-normalized confidence; use `--laya-confidence laya`
   for Laya's native entropy confidence.
 - `/health` is an operational endpoint outside `/v1`.
@@ -603,6 +606,9 @@ cargo test -p sys1-laya -- --ignored --nocapture
 
 # Long-context exact local-window parity (CUDA, cached checkpoint)
 cargo test --release -p sys1-laya --features cuda --test long_context -- --ignored --nocapture
+
+# Long-context scanning against the official predict_long output
+cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
 ```
 
 ## Known gaps / roadmap
@@ -612,7 +618,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 - A published upstream Laya ONNX artifact. The repository exporter now produces
   parity-checked models locally; TensorRT remains available only through the
   ORT TensorRT EP.
-- Long-context scanning, abstention, parallel option layout (v1.1).
+- Abstention (`min_confidence`) and parallel option layout (v1.1).
 - FlashAttention for long contexts: a prototype built with a hdim64-only
   candle-flash-attn + CUDA 13.3 and ran at ~69 ms vs ~181 ms for a 932-token
   state, but diverged from eager/F32 answers. The upstream full build with

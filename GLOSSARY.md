@@ -109,6 +109,11 @@ _Avoid_: Laya 模型（冗余）
 在 Laya 变体之间按语言或 typed-decisions 工作流签名选择 checkpoint 的组件。
 _Avoid_: Model selector
 
+**Long-context scanning（长上下文扫描）**：
+把超过上下文窗口的 state 按 token 切成重叠窗口、逐窗打分并按问题类型聚合的进程内能力。
+它与单纯的 local-window attention 不同：后者优化单次前向，前者跨多次前向覆盖整篇文档。
+_Avoid_: Chunking（仅指切分动作时）、truncation
+
 ## 模型供给
 
 **Model source（模型源）**：

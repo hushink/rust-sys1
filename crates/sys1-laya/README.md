@@ -156,6 +156,43 @@ let urgency = output.answers.score("urgency")?;
 `TypeSafe` confidence is `(K * p_max - 1) / (K - 1)`; `LayaNative` is
 `1 - H(p) / ln(K)`. `noul` answers never carry confidence, matching the official shape.
 
+## Long-context scanning
+
+`DecisionModel::predict_long` tokenizes the state once, splits it into
+overlapping token windows, scores them in shared forward passes, and aggregates
+per question. `LayaModel`, `LayaOnnxModel`, and `LayaRouter` implement it; the
+official wire API is unchanged.
+
+```rust
+use sys1_core::LongContextOptions;
+
+let output = model.predict_long(
+    &State::text(document),
+    &questions,
+    LongContextOptions {
+        window: Some(512),   // default: max(64, max_len - head_max_len - 8)
+        stride: Some(256),   // default: half the effective window
+        batch_size: None,    // windows per forward pass
+    },
+)?;
+let deciding = output.window("urgency").expect("window attribution");
+assert_eq!(deciding.count, output.scored_windows);
+```
+
+- `noul` takes the largest P(true) across windows.
+- `choice` / `score` take the answer from the single most-confident window, so
+  a localized signal is not out-voted by neutral windows.
+- Each answer's window records `index`, `token_start`, `token_end`, and
+  `count`; `scored_windows` maps to the official `usage.windows`.
+- A state that fits one window takes the ordinary `predict` path
+  (`scored_windows = 1`, no per-answer window).
+- `usage.input_tokens` sums every scored window, including overlap. The
+  returned confidence belongs to the deciding window, not the whole document.
+
+The English checkpoint was checked against official `predict_long` on the same
+state, questions, window, and stride: answers, `action.act_probability`, window
+attribution, and `usage.input_tokens` match.
+
 ## Router
 
 `LayaRouter::new(root, options)` expects the Laya repository root with

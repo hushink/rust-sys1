@@ -299,9 +299,10 @@ let billing = output.answers.noul("billing")?;
 `EngineOptions` 按 `hub`（缓存、端点、凭据）、`registry`（LRU/keep-alive）与
 `model`（`ModelOptions`：device、dtype、上下文长度、confidence、attention）分组。
 `engine.add("hf:...")` / `add_as` 注册引用，`load` / `unload` 控制常驻，
-`models` / `model` 查看目录，`predict_batch` 执行原生 batch，`systemone`
-返回官方 wire response。Engine 实现了 `ModelResolver`，因此也可作为服务端
-`/api/models` 运行时管理的 resolver。
+`models` / `model` 查看目录，`predict_batch` 执行原生 batch，`predict_long`
+用重叠窗口扫描长 state 并返回 typed 窗口归因，`systemone` 返回官方 wire
+response。Engine 实现了 `ModelResolver`，因此也可作为服务端 `/api/models`
+运行时管理的 resolver。
 
 原来的直接 checkpoint API 保持不变：
 
@@ -331,7 +332,8 @@ let billing = output.answers.noul("billing")?;
 - `box` 问题与图片 `assets` 会被解析，但 Laya 返回 `422 unsupported`；缺少
   `TypeSafe-Danger-Zone-Images: true` 返回 `400`。
 - 请求体上限 32 MiB；支持 gzip；当前构建对 zstd 返回 `415`。
-- 超长 state 返回 `400 max_tokens_exceeded`，不会静默截断。
+- `/v1` 与普通 `predict` 对超长 state 返回 `400 max_tokens_exceeded`，不会静默
+  截断；typed `predict_long` / `sys1 run --long` 会用重叠窗口扫描。
 - `/v1/*` 默认 TypeSafe/ollaya 归一化 confidence；`--laya-confidence laya` 切换为
   Laya 原生熵置信度。
 - `/health` 是非官方运维端点，位于 `/v1` 之外。
@@ -561,6 +563,9 @@ cargo test -p sys1-laya -- --ignored --nocapture
 
 # 长上下文 local-window 对齐（CUDA，本地 checkpoint）
 cargo test --release -p sys1-laya --features cuda --test long_context -- --ignored --nocapture
+
+# 长上下文扫描与官方 predict_long 输出对齐
+cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
 ```
 
 ## 已知缺口 / Roadmap
@@ -569,7 +574,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 - TensorRT EP 的 CI 需要安装了 TensorRT 的 self-hosted GPU runner。
 - 上游发布的 Laya ONNX 产物。仓库内的导出器已能本地生成并完成 golden 对齐；
   TensorRT 仍只能通过 ORT TensorRT EP 使用。
-- long context 扫描、abstention、parallel option layout（v1.1）。
+- abstention（`min_confidence`）与 parallel option layout（v1.1）。
 - 长上下文 FlashAttention：用 hdim64-only candle-flash-attn + CUDA 13.3 的原型
   把 932 token 延迟从 ~181 ms 降到 ~69 ms，但答案与 eager/F32 不一致；上游完整
   构建在 CUDA 13.4/Windows 上还遇到 `cicc` access violation。数值对齐前不合并。
