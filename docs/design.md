@@ -208,6 +208,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 已用本地缓存权重验证：`sys1 run`、`sys1 serve` 的 `/v1/models`、`/v1/systemone`、`/health`、gzip 请求；`laya-latest` 选中 English 并成功加载。
 - 已用本地缓存权重验证运行时管理：`/api/models` 列表、load/unload/reload、按 `local:` 引用动态添加、推理、删除；CPU F32 multilingual 冷加载约 12 s。
 - 已用本地回环 HTTP 模型中心验证：manifest 解析、相对文件 URL、Bearer token、Range 断点续传，以及 `[models]` 名称映射。
+- 已用本地假端点验证 HF（分页、子目录、LFS sha256、release date、token、URL 编码）与 ModelScope（Root/Recursive、token+cookie、3000 条截断拆分）。
 - 已用本地缓存权重验证 `InferenceEngine` 进程内链路：`from_directory` → `add` → `predict` → `unload`；示例输出 noul 0.9678、score 1.7664，ignored 集成测试 19.4 s 通过。
 - 命名边界已整理：非 `sys1-laya` crate 不再定义 `Laya*` 标识符；checkpoint 布局辅助移入 `sys1-laya`。
 - 已实现 `/metrics` 与 `/api/metrics`（systemone、batching、模型生命周期、按模型请求数）；`preload` 启动预加载在 `serve` 绑定端口前执行，未知模型即失败。

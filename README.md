@@ -506,9 +506,10 @@ pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
 cargo test --offline --workspace
 ```
 
-Hub tests spin up a loopback HTTP model center and cover manifest resolution,
-Bearer tokens, and Range-resumed downloads. CI runs fmt, clippy, and tests on
-Linux, Windows, and macOS (`.github/workflows/ci.yml`). The optional
+Hub tests spin up loopback model centers and cover static HTTP manifests,
+Bearer tokens, Range-resumed downloads, HF pagination/subfolders/LFS hashes,
+and ModelScope token headers plus 3000-entry truncation splitting. CI runs fmt,
+clippy, and tests on Linux, Windows, and macOS (`.github/workflows/ci.yml`). The optional
 `.github/workflows/gpu.yml` runs the long-context parity test and a loadgen
 smoke test on a self-hosted Linux `gpu` + `cuda` runner; set the repository
 variable `SYS1_LAYA_TEST_ROOT` to a cached multilingual checkpoint.

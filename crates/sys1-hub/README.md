@@ -68,5 +68,10 @@ Custom centers implement `ModelSource` and are passed to `Hub::with_sources`.
 cargo test --offline -p sys1-hub
 ```
 
-Integration tests start a loopback HTTP model center and cover relative file
-URLs, Bearer token auth, and Range-resumed `.partial` downloads.
+Integration tests start loopback model centers and cover:
+
+- static HTTP manifests, relative URLs, Bearer tokens, Range-resumed downloads;
+- Hugging Face tree pagination (`Link` headers), subfolders, LFS sha256,
+  revision/path URL encoding, release dates, and token headers;
+- ModelScope `Root`/`Recursive` listing, token + cookie headers, and the
+  3000-entry recursive listing split.

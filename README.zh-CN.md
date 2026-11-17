@@ -473,8 +473,9 @@ pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
 cargo test --offline --workspace
 ```
 
-Hub 测试会启动本地回环 HTTP 模型中心，覆盖 manifest 解析、Bearer token 和
-Range 断点续传。CI 在 Linux、Windows、macOS 上运行 fmt、clippy 与测试
+Hub 测试会启动本地回环模型中心，覆盖静态 manifest、Bearer token、Range
+断点续传、HF 分页/子目录/LFS hash，以及 ModelScope token 头与 3000 条截断拆分。
+CI 在 Linux、Windows、macOS 上运行 fmt、clippy 与测试
 （`.github/workflows/ci.yml`）。可选的 `.github/workflows/gpu.yml` 在
 self-hosted Linux `gpu` + `cuda` runner 上运行长上下文对齐与 loadgen 冒烟测试；
 需要把仓库变量 `SYS1_LAYA_TEST_ROOT` 指向已缓存的 multilingual checkpoint。

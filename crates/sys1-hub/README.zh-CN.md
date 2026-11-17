@@ -68,5 +68,10 @@ manifest，不下载文件。
 cargo test --offline -p sys1-hub
 ```
 
-集成测试会启动本地回环 HTTP 模型中心，覆盖相对文件 URL、Bearer token 认证与
-Range 断点续传的 `.partial` 下载。
+集成测试会启动本地回环模型中心，覆盖：
+
+- 静态 HTTP manifest、相对 URL、Bearer token 与 Range 断点续传下载；
+- Hugging Face tree 分页（`Link` 头）、子目录、LFS sha256、revision/路径 URL
+  编码、发布日期与 token 头；
+- ModelScope `Root`/`Recursive` 列表、token + cookie 头，以及 3000 条递归列表
+  截断后的目录拆分。
