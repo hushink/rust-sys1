@@ -1,0 +1,25 @@
+[package]
+name = "sys1-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "TypeSafe-compatible System One HTTP server for rust-sys1"
+readme = "README.md"
+
+[dependencies]
+sys1-core = { path = "../sys1-core" }
+sys1-protocol = { path = "../sys1-protocol" }
+axum.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+flate2.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+indexmap.workspace = true

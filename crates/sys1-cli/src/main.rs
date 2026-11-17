@@ -1,0 +1,575 @@
+use anyhow::{Context, bail};
+use candle_core::{DType, Device};
+use clap::{Parser, Subcommand};
+use indexmap::IndexMap;
+use std::collections::HashSet;
+use std::fs;
+use std::io::Read;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+use sys1_core::{
+    DecisionModel, DevicePreference, ModelFile, ModelManifest, ModelRegistry, Questions,
+    RegistryConfig,
+};
+use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
+use sys1_laya::{ConfidenceMode, LayaFactory, LayaModel, LayaOptions, set_tf32};
+use sys1_protocol::{Question, State, SystemOneResponse};
+use sys1_server::{BatchConfig, ServerConfig, serve};
+use tracing_subscriber::EnvFilter;
+
+#[derive(Parser)]
+#[command(
+    name = "sys1",
+    version,
+    about = "System One inference server and model hub"
+)]
+struct Cli {
+    #[arg(long, global = true, env = "SYS1_CACHE", value_name = "DIR")]
+    cache: Option<PathBuf>,
+    #[arg(long, global = true)]
+    offline: bool,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Serve the TypeSafe-compatible System One API.
+    Serve(ServeArgs),
+    /// Download and materialize a model.
+    Pull(PullArgs),
+    /// List cached models.
+    List,
+    /// Resolve and print a model manifest.
+    Show(ShowArgs),
+    /// Remove a cached model.
+    Rm(RmArgs),
+    /// Run one inference from a JSON input file.
+    Run(RunArgs),
+    /// Print build and device diagnostics.
+    Doctor(DoctorArgs),
+}
+
+#[derive(clap::Args)]
+struct ServeArgs {
+    #[arg(long, default_value = "127.0.0.1:8080")]
+    bind: SocketAddr,
+    #[arg(long, env = "SYS1_API_KEY")]
+    api_key: Option<String>,
+    #[arg(long = "model", value_name = "NAME=REF")]
+    models: Vec<String>,
+    #[arg(long, default_value = "auto")]
+    device: String,
+    #[arg(long, default_value = "auto")]
+    dtype: String,
+    #[arg(long)]
+    max_len: Option<usize>,
+    #[arg(long, default_value = "typesafe")]
+    laya_confidence: String,
+    /// Maximum requests per model forward pass (default: 32).
+    #[arg(long, default_value_t = 32)]
+    batch_max: usize,
+    /// Maximum wait to collect a batch, in milliseconds (default: 2).
+    #[arg(long, default_value_t = 2)]
+    batch_wait_ms: u64,
+    /// Disable cross-request batching.
+    #[arg(long)]
+    no_batch: bool,
+    /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
+    #[arg(long)]
+    tf32: bool,
+    /// Disable exact sliding-window attention for local layers.
+    #[arg(long)]
+    no_local_window: bool,
+}
+
+#[derive(clap::Args)]
+struct PullArgs {
+    reference: String,
+}
+
+#[derive(clap::Args)]
+struct ShowArgs {
+    reference: String,
+}
+
+#[derive(clap::Args)]
+struct RmArgs {
+    reference: String,
+}
+
+#[derive(clap::Args)]
+struct RunArgs {
+    reference: String,
+    #[arg(long, value_name = "FILE", default_value = "-")]
+    input: String,
+    #[arg(long, default_value = "auto")]
+    device: String,
+    #[arg(long, default_value = "auto")]
+    dtype: String,
+    #[arg(long)]
+    max_len: Option<usize>,
+    #[arg(long, default_value = "typesafe")]
+    laya_confidence: String,
+    /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
+    #[arg(long)]
+    tf32: bool,
+    /// Disable exact sliding-window attention for local layers.
+    #[arg(long)]
+    no_local_window: bool,
+}
+
+#[derive(clap::Args)]
+struct DoctorArgs {
+    #[arg(long, default_value = "auto")]
+    device: String,
+    #[arg(long, default_value = "auto")]
+    dtype: String,
+}
+
+fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
+
+    let cli = Cli::parse();
+    let cache = cli.cache.clone();
+    let offline = cli.offline;
+    match cli.command {
+        Command::Serve(args) => serve_command(cache.as_deref(), offline, args),
+        Command::Pull(args) => {
+            let hub = make_hub(cache.as_deref(), offline)?;
+            let pulled = pull_model(&hub, &args.reference)?;
+            println!("{} -> {}", pulled.manifest.name, pulled.directory.display());
+            Ok(())
+        }
+        Command::List => {
+            let hub = make_hub(cache.as_deref(), offline)?;
+            for model in hub.list_cached()? {
+                println!(
+                    "{:<28} {:<10} {:<12} {}",
+                    model.manifest.name,
+                    model.manifest.backend,
+                    model.manifest.format,
+                    model.directory.display()
+                );
+            }
+            Ok(())
+        }
+        Command::Show(args) => {
+            let hub = make_hub(cache.as_deref(), offline)?;
+            let manifest = hub.resolve(&args.reference)?;
+            println!("{}", serde_json::to_string_pretty(&manifest)?);
+            Ok(())
+        }
+        Command::Rm(args) => {
+            let hub = make_hub(cache.as_deref(), offline)?;
+            let location = hub.cache_location(&args.reference)?;
+            if hub.remove(&args.reference)? {
+                println!("removed {}", location.display());
+            } else {
+                println!("not cached: {}", location.display());
+            }
+            Ok(())
+        }
+        Command::Run(args) => run_command(cache.as_deref(), offline, args),
+        Command::Doctor(args) => doctor_command(cache.as_deref(), offline, args),
+    }
+}
+
+fn serve_command(cache: Option<&Path>, offline: bool, args: ServeArgs) -> anyhow::Result<()> {
+    set_tf32(args.tf32);
+    let options = make_laya_options(
+        &args.device,
+        &args.dtype,
+        args.max_len,
+        &args.laya_confidence,
+        !args.no_local_window,
+    )?;
+    let registry = {
+        let hub = make_hub(cache, offline)?;
+        let (manifests, factory) = build_models(&hub, &args.models, options)?;
+        Arc::new(ModelRegistry::new(
+            manifests,
+            Arc::new(factory),
+            RegistryConfig::default(),
+        )?)
+    };
+    let batching = if args.no_batch {
+        None
+    } else {
+        Some(BatchConfig {
+            max_batch: args.batch_max.max(1),
+            max_wait: Duration::from_millis(args.batch_wait_ms),
+        })
+    };
+    let config = ServerConfig {
+        api_key: args.api_key,
+        batching,
+        ..ServerConfig::default()
+    };
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(serve(args.bind, registry, config))?;
+    Ok(())
+}
+
+fn run_command(cache: Option<&Path>, offline: bool, args: RunArgs) -> anyhow::Result<()> {
+    set_tf32(args.tf32);
+    let hub = make_hub(cache, offline)?;
+    let options = make_laya_options(
+        &args.device,
+        &args.dtype,
+        args.max_len,
+        &args.laya_confidence,
+        !args.no_local_window,
+    )?;
+    let pulled = pull_model(&hub, &args.reference)?;
+    let input = read_input(&args.input)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&input).context("input must be a JSON object")?;
+    let state = State::from_value(
+        value
+            .get("state")
+            .cloned()
+            .context("input requires a `state` field")?,
+    )?;
+    let questions: IndexMap<String, Question> = serde_json::from_value(
+        value
+            .get("questions")
+            .cloned()
+            .context("input requires a `questions` field")?,
+    )
+    .context("invalid questions")?;
+    let questions = Questions::from(questions);
+
+    let model = LayaModel::load_dir(&pulled.directory, options)?;
+    let output = model.predict(&state, &questions)?;
+    let response = SystemOneResponse {
+        model: pulled.manifest.name,
+        answers: output.answers.into_map(),
+        usage: output.usage,
+    };
+    println!("{}", serde_json::to_string_pretty(&response)?);
+    Ok(())
+}
+
+fn doctor_command(cache: Option<&Path>, offline: bool, args: DoctorArgs) -> anyhow::Result<()> {
+    let hub = make_hub(cache, offline)?;
+    let device = resolve_device(&args.device)?;
+    let dtype = parse_dtype(&args.dtype)?;
+    println!("rust-sys1 doctor");
+    println!("  cuda: {}", cfg!(feature = "cuda"));
+    println!("  cudnn: {}", cfg!(feature = "cudnn"));
+    println!("  metal: {}", cfg!(feature = "metal"));
+    println!("  accelerate: {}", cfg!(feature = "accelerate"));
+    println!("  device: {device:?}");
+    println!("  dtype: {dtype:?}");
+    println!("  cache: {}", hub.config().cache_dir.display());
+    println!("  hf endpoint: {}", hub.config().hf_endpoint);
+    println!(
+        "  modelscope endpoint: {}",
+        hub.config().modelscope_endpoint
+    );
+    println!("  offline: {}", hub.config().offline);
+    Ok(())
+}
+
+fn make_hub(cache: Option<&Path>, offline: bool) -> anyhow::Result<Hub> {
+    let mut config = HubConfig::from_env();
+    if let Some(cache) = cache {
+        config.cache_dir = cache.to_path_buf();
+    }
+    if offline {
+        config.offline = true;
+    }
+    Ok(Hub::new(config)?)
+}
+
+fn make_laya_options(
+    device: &str,
+    dtype: &str,
+    max_len: Option<usize>,
+    confidence: &str,
+    local_window: bool,
+) -> anyhow::Result<LayaOptions> {
+    Ok(LayaOptions {
+        device: resolve_device(device)?,
+        dtype: parse_dtype(dtype)?,
+        max_len,
+        confidence_mode: parse_confidence(confidence)?,
+        local_window,
+    })
+}
+
+fn resolve_device(value: &str) -> anyhow::Result<Device> {
+    let preference: DevicePreference = value.parse()?;
+    match preference {
+        DevicePreference::Auto => {
+            #[cfg(feature = "cuda")]
+            if let Ok(device) = Device::new_cuda(0) {
+                tracing::info!("auto-selected CUDA device 0");
+                return Ok(device);
+            }
+            #[cfg(feature = "metal")]
+            if let Ok(device) = Device::new_metal(0) {
+                tracing::info!("auto-selected Metal device");
+                return Ok(device);
+            }
+            tracing::info!("auto-selected CPU");
+            Ok(Device::Cpu)
+        }
+        DevicePreference::Cpu => Ok(Device::Cpu),
+        DevicePreference::Cuda(index) => {
+            #[cfg(feature = "cuda")]
+            {
+                Device::new_cuda(index)
+                    .map_err(|error| anyhow::anyhow!("CUDA device {index} unavailable: {error}"))
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                let _ = index;
+                bail!("this binary was built without the `cuda` feature")
+            }
+        }
+        DevicePreference::Metal => {
+            #[cfg(feature = "metal")]
+            {
+                Device::new_metal(0).map_err(|error| anyhow::anyhow!("Metal unavailable: {error}"))
+            }
+            #[cfg(not(feature = "metal"))]
+            {
+                bail!("this binary was built without the `metal` feature")
+            }
+        }
+    }
+}
+
+fn parse_dtype(value: &str) -> anyhow::Result<DType> {
+    match value.to_ascii_lowercase().as_str() {
+        "auto" | "f32" => Ok(DType::F32),
+        "f16" => Ok(DType::F16),
+        "bf16" => Ok(DType::BF16),
+        other => bail!("unsupported --dtype {other}; expected auto, f32, f16, or bf16"),
+    }
+}
+
+fn parse_confidence(value: &str) -> anyhow::Result<ConfidenceMode> {
+    match value.to_ascii_lowercase().as_str() {
+        "typesafe" | "default" => Ok(ConfidenceMode::TypeSafe),
+        "laya" | "native" => Ok(ConfidenceMode::LayaNative),
+        other => bail!("unsupported --laya-confidence {other}; expected typesafe or laya"),
+    }
+}
+
+fn build_models(
+    hub: &Hub,
+    specs: &[String],
+    options: LayaOptions,
+) -> anyhow::Result<(Vec<ModelManifest>, LayaFactory)> {
+    let mut factory = LayaFactory::new();
+    let mut manifests = Vec::new();
+    let mut seen = HashSet::new();
+
+    if specs.is_empty() {
+        for pulled in hub.list_cached()? {
+            if !is_laya_model(&pulled.manifest) {
+                continue;
+            }
+            factory.register(&pulled.manifest.name, &pulled.directory, options.clone());
+            push_manifest(&mut manifests, &mut seen, pulled.manifest);
+        }
+        if manifests.is_empty() {
+            bail!("no cached Laya models; run `sys1 pull <reference>` or pass --model NAME=REF");
+        }
+        return Ok((manifests, factory));
+    }
+
+    for spec in specs {
+        let (name, reference) = parse_model_spec(spec)?;
+        let mut pulled = pull_model(hub, &reference)?;
+        if !is_laya_model(&pulled.manifest) {
+            bail!("{reference} does not look like a Laya safetensors checkpoint");
+        }
+        pulled.manifest.family = "laya".to_owned();
+        pulled.manifest.backend = "candle".to_owned();
+        pulled.manifest.format = "safetensors".to_owned();
+
+        if name == "laya-latest" && has_laya_variants(&pulled.directory) {
+            factory.register_router("laya-latest", &pulled.directory, options.clone());
+            for (variant_name, directory) in variant_directories(&pulled.directory) {
+                if !is_laya_directory(&directory) {
+                    continue;
+                }
+                factory.register(variant_name, &directory, options.clone());
+                let mut variant = pulled.manifest.clone();
+                variant.name = variant_name.to_owned();
+                variant.aliases.clear();
+                variant.description = format!("{} ({variant_name})", pulled.manifest.description);
+                push_manifest(&mut manifests, &mut seen, variant);
+            }
+            pulled.manifest.name = "laya-latest".to_owned();
+            pulled.manifest.aliases.clear();
+            push_manifest(&mut manifests, &mut seen, pulled.manifest);
+        } else {
+            if name == "laya-latest" {
+                tracing::warn!(
+                    "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
+                );
+            }
+            pulled.manifest.name = name.clone();
+            pulled.manifest.aliases.clear();
+            factory.register(&name, &pulled.directory, options.clone());
+            push_manifest(&mut manifests, &mut seen, pulled.manifest);
+        }
+    }
+    Ok((manifests, factory))
+}
+
+fn push_manifest(
+    manifests: &mut Vec<ModelManifest>,
+    seen: &mut HashSet<String>,
+    manifest: ModelManifest,
+) {
+    if seen.insert(manifest.name.clone()) {
+        manifests.push(manifest);
+    }
+}
+
+fn variant_directories(root: &Path) -> [(&'static str, PathBuf); 3] {
+    [
+        ("laya-english", root.to_path_buf()),
+        ("laya-multilingual", root.join("multilingual")),
+        ("laya-typed-decisions", root.join("typed-decisions")),
+    ]
+}
+
+fn has_laya_variants(root: &Path) -> bool {
+    is_laya_directory(root)
+        && is_laya_directory(&root.join("multilingual"))
+        && is_laya_directory(&root.join("typed-decisions"))
+}
+
+fn is_laya_directory(directory: &Path) -> bool {
+    directory.join("model.safetensors").is_file()
+        && directory.join("encoder/config.json").is_file()
+        && directory.join("rl_agent_config.json").is_file()
+        && (directory.join("tokenizer/tokenizer.json").is_file()
+            || directory.join("tokenizer.json").is_file())
+}
+
+fn parse_model_spec(spec: &str) -> anyhow::Result<(String, String)> {
+    let (name, reference) = spec
+        .split_once('=')
+        .with_context(|| format!("expected NAME=REF, got {spec:?}"))?;
+    let name = name.trim();
+    let reference = reference.trim();
+    if name.is_empty() || reference.is_empty() {
+        bail!("expected NAME=REF, got {spec:?}");
+    }
+    Ok((name.to_owned(), reference.to_owned()))
+}
+
+fn pull_model(hub: &Hub, reference: &str) -> anyhow::Result<PulledModel> {
+    let parsed: ModelRef = reference.parse()?;
+    if parsed.scheme == "local" {
+        let path = PathBuf::from(&parsed.location);
+        if path.is_dir() && !path.join("model.json").is_file() {
+            return synthesise_local(&path);
+        }
+    }
+    Ok(hub.pull(reference)?)
+}
+
+fn synthesise_local(directory: &Path) -> anyhow::Result<PulledModel> {
+    let required = [
+        "model.safetensors",
+        "encoder/config.json",
+        "rl_agent_config.json",
+        "tokenizer/tokenizer.json",
+    ];
+    for path in required {
+        if !directory.join(path).is_file() {
+            bail!("{} is missing {path}", directory.display());
+        }
+    }
+
+    let mut files = Vec::new();
+    for path in [
+        "model.safetensors",
+        "encoder/config.json",
+        "rl_agent_config.json",
+        "tokenizer/tokenizer.json",
+        "tokenizer/tokenizer_config.json",
+    ] {
+        let full = directory.join(path);
+        if !full.is_file() {
+            continue;
+        }
+        let size = fs::metadata(&full)
+            .with_context(|| format!("metadata for {}", full.display()))?
+            .len();
+        files.push(ModelFile {
+            path: path.to_owned(),
+            url: String::new(),
+            sha256: None,
+            git_sha1: None,
+            size,
+        });
+    }
+
+    let name = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("laya")
+        .to_owned();
+    let manifest = ModelManifest {
+        schema_version: 1,
+        name,
+        description: format!("Local Laya checkpoint at {}", directory.display()),
+        release_date: "1970-01-01".to_owned(),
+        family: "laya".to_owned(),
+        variant: None,
+        backend: "candle".to_owned(),
+        format: "safetensors".to_owned(),
+        version: "local".to_owned(),
+        aliases: Vec::new(),
+        files,
+    };
+    manifest.validate()?;
+
+    let mut file_map = IndexMap::new();
+    for file in &manifest.files {
+        file_map.insert(file.path.clone(), directory.join(&file.path));
+    }
+    Ok(PulledModel {
+        manifest,
+        directory: directory.to_path_buf(),
+        files: file_map,
+    })
+}
+
+fn is_laya_model(manifest: &ModelManifest) -> bool {
+    let has = |path: &str| manifest.files.iter().any(|file| file.path == path);
+    has("model.safetensors")
+        && has("encoder/config.json")
+        && has("rl_agent_config.json")
+        && (has("tokenizer/tokenizer.json") || has("tokenizer.json"))
+}
+
+fn read_input(input: &str) -> anyhow::Result<String> {
+    if input == "-" {
+        let mut buffer = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buffer)
+            .context("read stdin")?;
+        Ok(buffer)
+    } else {
+        fs::read_to_string(input).with_context(|| format!("read {input}"))
+    }
+}

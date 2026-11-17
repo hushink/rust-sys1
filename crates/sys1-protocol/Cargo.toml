@@ -1,0 +1,15 @@
+[package]
+name = "sys1-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "System One wire types, validation, and typed primitives"
+readme = "README.md"
+
+[dependencies]
+indexmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
+thiserror = { workspace = true }

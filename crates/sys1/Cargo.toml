@@ -1,0 +1,23 @@
+[package]
+name = "sys1"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Type-safe in-process System One inference and TypeSafe-compatible serving"
+readme = "README.md"
+
+[dependencies]
+sys1-core = { path = "../sys1-core" }
+sys1-protocol = { path = "../sys1-protocol" }
+sys1-hub = { path = "../sys1-hub", optional = true }
+sys1-laya = { path = "../sys1-laya", optional = true }
+
+[features]
+default = ["laya", "hub"]
+laya = ["dep:sys1-laya"]
+hub = ["dep:sys1-hub"]
+cuda = ["sys1-laya?/cuda"]
+cudnn = ["sys1-laya?/cudnn"]
+metal = ["sys1-laya?/metal"]
+accelerate = ["sys1-laya?/accelerate"]

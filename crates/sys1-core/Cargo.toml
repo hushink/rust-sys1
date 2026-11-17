@@ -1,0 +1,15 @@
+[package]
+name = "sys1-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Core traits, manifest, registry, and typed in-process API for rust-sys1"
+readme = "README.md"
+
+[dependencies]
+sys1-protocol = { path = "../sys1-protocol" }
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

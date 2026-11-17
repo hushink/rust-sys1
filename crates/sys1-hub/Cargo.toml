@@ -1,0 +1,23 @@
+[package]
+name = "sys1-hub"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Model sources and local cache for rust-sys1"
+readme = "README.md"
+
+[dependencies]
+sys1-core = { path = "../sys1-core" }
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+hex.workspace = true
+url.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

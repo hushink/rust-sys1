@@ -1,0 +1,16 @@
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+[source.rsproxy]
+registry = "https://rsproxy.cn/crates.io-index"
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+[net]
+git-fetch-with-cli = true
+[alias]
+# 桌面端推理后端必须显式选择。
+
+[env]
+# CUDA 13.x 的 CCCL 要求 MSVC 使用标准预处理器；nvcc 会读取该变量。
+NVCC_PREPEND_FLAGS = "-Xcompiler=/Zc:preprocessor -Xcompiler=/MD -DCCCL_IGNORE_MSVC_TRADITIONAL_PREPROCESSOR_WARNING"

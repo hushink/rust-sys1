@@ -1,0 +1,69 @@
+# sys1-hub
+
+[English](README.md)
+
+rust-sys1 的模型源、manifest 解析与磁盘缓存。
+
+## 模型源
+
+| Scheme | 示例 |
+|---|---|
+| 本地路径 | `local:/models/laya-multilingual` 或已存在的路径 |
+| Hugging Face | `hf:convaiinnovations/laya@main#multilingual` |
+| ModelScope | `modelscope:owner/name@master` |
+| 静态 HTTP 中心 | `https://models.example.com/laya/model.json` |
+
+语法：`scheme:location[@revision][#subfolder]`。
+
+## Manifest
+
+```json
+{
+  "schema_version": 1,
+  "name": "laya-multilingual",
+  "description": "Laya multilingual decision model",
+  "release_date": "2026-01-01",
+  "family": "laya",
+  "variant": "multilingual",
+  "backend": "candle",
+  "format": "safetensors",
+  "version": "main",
+  "files": [
+    {"path": "model.safetensors", "url": "...", "sha256": "...", "size": 643835514}
+  ]
+}
+```
+
+`sha256` 可选；HF 非 LFS 文件用 `git_sha1` 兜底。路径必须是相对路径、使用正斜杠、
+且不能包含 `..`。
+
+## 示例
+
+```rust
+use sys1_hub::{Hub, HubConfig};
+
+let hub = Hub::new(HubConfig::from_env())?;
+let pulled = hub.pull("hf:convaiinnovations/laya@main#multilingual")?;
+println!("{} at {}", pulled.manifest.name, pulled.directory.display());
+```
+
+`pull` 返回 `PulledModel`（manifest、目录、每个文件的路径）。`resolve` 只解析
+manifest，不下载文件。
+
+## 缓存与网络行为
+
+- 缓存 key 稳定、适合文件系统、带哈希。
+- 下载使用 `.partial`、HTTP Range 断点续传与 sha256 校验。
+- 同一模型的并发拉取在进程内串行化。
+- 离线模式读取缓存 manifest 并校验已有文件。
+- `HF_ENDPOINT` 支持镜像（`https://hf-mirror.com`）。
+- 支持 `MODELSCOPE_API_TOKEN`、`HF_TOKEN`、`SYS1_HUB_TOKEN`。
+- ModelScope 文件列表的 3000 条静默截断通过按目录拆分处理。
+
+自定义中心实现 `ModelSource`，通过 `Hub::with_sources` 注入。
+
+## 测试
+
+```bash
+cargo test --offline -p sys1-hub
+```

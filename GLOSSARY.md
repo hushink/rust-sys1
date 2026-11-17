@@ -1,0 +1,103 @@
+# rust-sys1
+
+一个可替换决策模型的 System One 推理库：提供进程内 SDK 与 TypeSafe 兼容的 API 服务。
+
+## 协议与厂商
+
+**System One model（决策模型）**：
+一类为软件做快速、结构化决策的 AI 模型；输入 state 与 questions，输出带概率的类型化答案，而不是生成文本。
+_Avoid_: Classifier、LLM
+
+**System One API**：
+System One 模型的服务协议，官方端点只有 `POST /v1/systemone` 与 `GET /v1/models`。
+_Avoid_: TypeSafe API、Jev API
+
+**TypeSafe**：
+提供 Jev 的厂商与服务（typesafe.ai），是厂商名而非协议名。
+_Avoid_: System One、Jev（作为厂商名时）
+
+**Jev**：
+TypeSafe 的旗舰 System One 模型，闭源、以远程服务形式提供。
+_Avoid_: System One
+
+**sys1 0.0.3**：
+crates.io 上现有的 Rust 版 System One 推理服务，本项目的参考实现之一。
+_Avoid_: 本项目、rust-sys1
+
+## 接口形态
+
+**In-process inference API（进程内推理接口）**：
+在调用方进程内直接加载模型并执行推理的 Rust 接口。
+_Avoid_: SDK、local server
+
+**Client SDK**：
+通过 HTTP 调用 System One API 的客户端库，例如 jev-sdk-rs。
+_Avoid_: In-process inference API
+
+**Cross-request batching（跨请求批处理）**：
+把同一模型、同一时刻到达的多个独立请求合并为一次前向，以提高吞吐；对调用方仍是一问一答。
+_Avoid_: Model batch（模型内部的 batch 维度）、request coalescing
+
+## 决策语义
+
+**State**：
+决策模型作答所依据的上下文，可以是字符串、对象或数组。
+_Avoid_: Prompt、input、context
+
+**Question**：
+针对 state 提出的一个带类型的问题，官方类型为 choice、score、noul 与 box。
+_Avoid_: Query、prompt
+
+**Choice**：
+从一组命名选项中选出一个；答案为选中项、完整概率分布与 confidence。
+_Avoid_: Classification、label
+
+**Score**：
+按有序档位评分；答案为概率加权期望值，可落在两个档位之间，并带档位图例、概率分布与 confidence。
+_Avoid_: Rating、regression
+
+**Noul**：
+对一个是/否命题给出 yes 的概率；没有独立的 confidence。
+_Avoid_: Boolean、yes/no answer
+
+**Box**：
+在图片中定位目标；答案为归一化的上、下、左、右边界与 confidence。
+_Avoid_: Bounding box、region
+
+**Asset**：
+随请求发送、并通过占位符在 state、instructions 或 criteria 中引用的图片资源；box 问题依赖它。
+_Avoid_: Image、attachment
+
+**Answer**：
+与 Question 一一对应的结果，类型与问题类型一致；官方类型为 choice、score、noul 与 box。
+_Avoid_: Prediction、result
+
+**Confidence**：
+答案所依据概率分布的峰值程度，用于判断自动执行还是升级处理；Noul 没有独立 confidence。
+_Avoid_: Probability
+
+**Response**：
+一次 System One API 调用的完整结果，由 model、answers、usage 组成。
+_Avoid_: Answer
+
+**Model family（模型族）**：
+共享同一推理架构与权重格式的一组决策模型，如 Laya、Kev。
+_Avoid_: Model type、architecture
+
+**Laya**：
+开源的 System One 模型族，包含 english、multilingual、typed-decisions 三个 checkpoint。
+_Avoid_: Laya 模型（冗余）
+
+**Laya Router**：
+在 Laya 变体之间按语言或 typed-decisions 工作流签名选择 checkpoint 的组件。
+_Avoid_: Model selector
+
+## 模型供给
+
+**Model source（模型源）**：
+模型权重与配套文件的获取来源，如本地路径、Hugging Face、ModelScope 或自定义模型中心。
+_Avoid_: Downloader、backend
+
+**Inference backend（推理后端）**：
+执行模型前向计算的引擎，如 candle、ONNX Runtime。
+_Avoid_: Model、engine（作为整体系统时）

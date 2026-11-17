@@ -1,0 +1,11 @@
+This crate is an independent Rust implementation of the Laya decision-model
+architecture.
+
+Behavioral and architectural reference:
+- sys1 0.0.3, Copyright Alvaro Bartolome, Apache-2.0
+  https://github.com/alvarobartt/sys1
+- Official Laya repository (Convai Innovations), Apache-2.0
+  https://github.com/NandhaKishorM/laya
+
+No model weights are included. Model weights are downloaded by the user or by
+the sys1 hub and remain subject to their own licenses.

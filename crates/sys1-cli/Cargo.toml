@@ -1,0 +1,38 @@
+[package]
+name = "sys1-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "CLI and model hub for rust-sys1"
+readme = "README.md"
+
+[[bin]]
+name = "sys1"
+path = "src/main.rs"
+
+[dependencies]
+sys1-core = { path = "../sys1-core" }
+sys1-protocol = { path = "../sys1-protocol" }
+sys1-hub = { path = "../sys1-hub" }
+sys1-laya = { path = "../sys1-laya" }
+sys1-server = { path = "../sys1-server" }
+candle-core = { version = "0.11", default-features = false }
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+reqwest.workspace = true
+
+[features]
+default = []
+cuda = ["sys1-laya/cuda", "candle-core/cuda"]
+cudnn = ["cuda", "sys1-laya/cudnn"]
+metal = ["sys1-laya/metal", "candle-core/metal"]
+accelerate = ["sys1-laya/accelerate", "candle-core/accelerate"]
