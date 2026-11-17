@@ -56,6 +56,8 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `register(manifest)` 添加目录项；重名和别名冲突会被拒绝，目录保持不变。
   `unregister(name)` 按名称或别名移除目录项并丢弃常驻实例。
 - `is_loaded(name)` 查询常驻状态，不刷新 LRU 时间。
+- `predict_output` 返回 typed `DecisionOutput`；`predict` 再包装为带规范模型名的
+  官方 `SystemOneResponse`。
 - `ModelResolver` 不属于注册表：调用方把引用解析成 manifest、注册它们，并提供
   能加载这些 manifest 的 factory。CLI 用它实现服务运行期间从 hub 添加模型。
 

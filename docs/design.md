@@ -38,30 +38,52 @@ sys1-server     axum：严格官方 /v1/*、/health、运行时 /api/*、跨请�
       ▲
 sys1-cli        clap 二进制：serve/pull/list/show/rm/run/doctor
       ▲
-sys1            umbrella：面向库用户的进程内 API，默认内置 Laya + 全部 hub 源
+sys1            umbrella：InferenceEngine + 进程内 API，默认内置 Laya + 全部 hub 源
 ```
 
 依赖方向单向向上；`sys1-core` 不依赖 `sys1-hub`，`sys1-server` 不依赖具体模型族。CLI 负责把 hub、laya、server 组装起来。
 
 ## 3. 进程内推理接口
 
-```rust
-use sys1::{State, Questions, Answers};
+高层入口是 umbrella crate 的 `InferenceEngine`，把 hub、manifest、后端 factory、
+注册表与协议类型串成一个对象：
 
-let model = sys1::laya::LayaModel::load("laya-multilingual")?;
+```rust
+use std::path::Path;
+use sys1::{EngineOptions, InferenceEngine, Questions, State};
+
+let engine = InferenceEngine::from_directory(
+    Path::new("/path/to/laya-multilingual"),
+    EngineOptions::default(),
+)?;
 let questions = Questions::new()
     .choice("tone", [("angry", "..."), ("calm", "...")])
     .score("urgency", ["Can wait", "This week", "Today"])
     .noul("billing", "Is this about billing?");
 
-let answers: Answers = model.predict(&State::text("..."), &questions)?;
-let tone = answers.choice("tone")?;   // 类型化读取
+let output = engine.predict(
+    "laya-multilingual",
+    &State::text("..."),
+    &questions,
+)?;
+let tone = output.answers.choice("tone")?; // 类型化读取
 ```
 
+- `EngineOptions` 分组：`hub`（缓存/端点/凭据）、`registry`（LRU/keep_alive）、
+  `model`（`ModelOptions`：device/dtype/max_len/confidence/attention）。
+- `new` 空目录；`from_reference` / `from_directory` 立即注册；`add` / `add_as`
+  通过 hub 物化并注册，仓库根自动注册 router 与三个变体；`remove` 卸载并移除。
+- `predict` 返回 typed `DecisionOutput`；`systemone` 返回官方 `SystemOneResponse`；
+  `predict_batch` 调用模型原生 batch；`load` / `unload` 控制常驻。
+- Engine 实现 `ModelResolver`，可直接作为 `sys1-server` 的运行时 resolver。
 - `Questions` 是保持插入顺序的 map；`Question` 是按 type 判别的 enum；`Answers` 同名 map，提供 `choice/score/noul` 类型化读取。
 - 核心 `predict` 同步执行，不绑定 tokio；提供可选 async wrapper。
-- `DecisionModel` trait 位于答案层，不抽象原始 logits。
+- `DecisionModel` trait 位于答案层，不抽象原始 logits；`predict_output` 提供 typed 结果。
 - 动态注册表使用对象安全 facade（`Arc<dyn DecisionModel>`）；库用户可直接用具体类型。
+- 命名边界：Laya 前缀类型/函数只定义在 `sys1-laya`。其他 crate 使用通用名
+  （如 `HubModelResolver`、`make_model_options`、`CheckpointFactory` 导入别名），
+  checkpoint 布局辅助（`local_checkpoint_manifest`、`register_checkpoint_bundle`）
+  也放在 `sys1-laya`；umbrella 根不导出 Laya 前缀类型。
 
 ## 4. HTTP API
 
@@ -176,6 +198,8 @@ let tone = answers.choice("tone")?;   // 类型化读取
 - 已用本地缓存权重验证：`sys1 run`、`sys1 serve` 的 `/v1/models`、`/v1/systemone`、`/health`、gzip 请求；`laya-latest` 选中 English 并成功加载。
 - 已用本地缓存权重验证运行时管理：`/api/models` 列表、load/unload/reload、按 `local:` 引用动态添加、推理、删除；CPU F32 multilingual 冷加载约 12 s。
 - 已用本地回环 HTTP 模型中心验证：manifest 解析、相对文件 URL、Bearer token、Range 断点续传，以及 `[models]` 名称映射。
+- 已用本地缓存权重验证 `InferenceEngine` 进程内链路：`from_directory` → `add` → `predict` → `unload`；示例输出 noul 0.9678、score 1.7664，ignored 集成测试 19.4 s 通过。
+- 命名边界已整理：非 `sys1-laya` crate 不再定义 `Laya*` 标识符；checkpoint 布局辅助移入 `sys1-laya`。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
 - 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。
@@ -230,3 +254,4 @@ let tone = answers.choice("tone")?;   // 类型化读取
 | Q29 | manifest 预留 `backend`/`format` |
 | Q31 | TensorRT 走 v1.1 ORT TensorRT EP，不做 candle 原生 TensorRT |
 | Q34 | 运行时模型管理：可变目录 + 可选 resolver + `/api/models` 管理端点；不持久化，配置为准 |
+| Q35 | 高层 `InferenceEngine` 放 umbrella；Laya 前缀 API 只留在 `sys1-laya`，其他 crate 用通用命名 |

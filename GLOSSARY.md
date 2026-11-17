@@ -30,6 +30,10 @@ _Avoid_: 本项目、rust-sys1
 在调用方进程内直接加载模型并执行推理的 Rust 接口。
 _Avoid_: SDK、local server
 
+**Inference engine（推理引擎）**：
+把模型获取、manifest、后端加载、模型目录与类型化推理组合起来的高层入口；调用方通过它加载、卸载和运行模型。
+_Avoid_: Model、registry、server
+
 **Client SDK**：
 通过 HTTP 调用 System One API 的客户端库，例如 jev-sdk-rs。
 _Avoid_: In-process inference API

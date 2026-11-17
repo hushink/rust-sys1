@@ -77,6 +77,17 @@ v1 的 Router 是启发式；完整官方 routing golden 对齐待补。
 的映射。`register` / `register_router` 接收 `&self`，因此服务运行期间也能添加模型；
 `unregister` 删除映射。重复注册同名项时保留第一次的注册，替换前需先 `unregister`。
 
+## Checkpoint 辅助
+
+checkpoint 布局知识集中在 sys1-laya，组合层无需再定义 Laya 前缀 API：
+
+- `is_checkpoint_directory` / `has_checkpoint_variants`
+- `variant_directories` — 仓库根目录下的三个目录名与路径
+- `local_checkpoint_manifest` — 为没有 `model.json` 的裸 checkpoint 目录生成
+  manifest 与文件映射
+- `register_checkpoint_bundle` — 注册单个 checkpoint 或 router bundle，返回应加入
+  注册表的 manifest
+
 ## 数值对齐
 
 Golden 测试对比官方 Laya vectors 的 `input_ids`、`markers`、logits 与答案。

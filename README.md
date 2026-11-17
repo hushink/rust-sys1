@@ -12,6 +12,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 
 - Strict official API: `POST /v1/systemone`, `GET /v1/models`; official `detail` error shape.
 - Process-in inference: typed `Questions` / `Answers`, no HTTP or serialization required.
+- `InferenceEngine`: one object wires the hub, manifest, backend factory, registry, and typed inference.
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
 - Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock.
@@ -29,7 +30,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 | [`sys1-laya`](crates/sys1-laya/README.md) | Clean-room Laya implementation and router |
 | [`sys1-server`](crates/sys1-server/README.md) | Axum server for `/v1/*` and `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.md) | `sys1` binary: serve/pull/list/show/rm/run/doctor |
-| [`sys1`](crates/sys1/README.md) | Umbrella in-process API |
+| [`sys1`](crates/sys1/README.md) | Umbrella in-process engine API |
 
 Each crate has an English `README.md` and a Chinese `README.zh-CN.md`.
 
@@ -169,21 +170,38 @@ curl http://127.0.0.1:8080/v1/systemone \
 
 ### In-process
 
+`InferenceEngine` wires the hub, manifest, backend factory, registry, and typed
+protocol together:
+
 ```rust
 use std::path::Path;
-use sys1::{DecisionModel, LayaModel, LayaOptions, Questions, State};
+use sys1::{EngineOptions, InferenceEngine, Questions, State};
 
-let model = LayaModel::load_dir(Path::new("/path/to/laya"), LayaOptions::default())?;
+let engine = InferenceEngine::from_directory(
+    Path::new("/path/to/laya-multilingual"),
+    EngineOptions::default(),
+)?;
 let state = State::text("I was charged twice. Please refund me today.");
 let questions = Questions::new()
     .choice("tone", [("angry", "Hostile"), ("calm", "Neutral")])
     .noul("billing", "Is this about billing?");
 
-let output = model.predict(&state, &questions)?;
+let output = engine.predict("laya-multilingual", &state, &questions)?;
 let tone = output.answers.choice("tone")?;
 let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`EngineOptions` groups `hub` (cache, endpoints, credentials), `registry`
+(LRU/keep-alive), and `model` (`ModelOptions`: device, dtype, context length,
+confidence, attention). `engine.add("hf:...")` / `add_as` register references,
+`load` / `unload` control residency, `models` / `model` inspect the catalog,
+`predict_batch` runs a native batch, and `systemone` returns the official wire
+response. The engine implements `ModelResolver`, so it can also back the
+server's `/api/models` runtime management.
+
+The umbrella root exports no Laya-prefixed types; Laya-specific helpers remain
+under `sys1::laya`.
 
 ## Compatibility notes
 

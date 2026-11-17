@@ -58,6 +58,8 @@ let response = registry.predict("laya-latest", &state, &questions)?;
   rejected without changing the catalog. `unregister(name)` removes the entry
   (by name or alias) and drops its resident instance.
 - `is_loaded(name)` reports residency without touching the LRU timestamp.
+- `predict_output` returns typed `DecisionOutput`; `predict` wraps it into the
+  official `SystemOneResponse` with the canonical model name.
 - A `ModelResolver` is not part of the registry: callers resolve a reference to
   manifests, register them, and pass a factory that can load them. The CLI uses
   this to add hub models while the server is running.

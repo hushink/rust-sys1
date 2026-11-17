@@ -2585,6 +2585,8 @@ dependencies = [
  "sys1-hub",
  "sys1-laya",
  "sys1-protocol",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

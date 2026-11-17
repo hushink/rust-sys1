@@ -5,6 +5,7 @@
 //! Laya repository and `sys1` 0.0.3 (Apache-2.0). No code or runtime
 //! dependency from those projects is required.
 
+mod bundle;
 mod calibration;
 mod config;
 mod factory;
@@ -14,6 +15,10 @@ mod prepare;
 mod router;
 mod tokenizer;
 
+pub use bundle::{
+    has_checkpoint_variants, is_checkpoint_directory, local_checkpoint_manifest,
+    register_checkpoint_bundle, variant_directories,
+};
 pub use calibration::ConfidenceMode;
 pub use factory::LayaFactory;
 pub use model::{LayaModel, LayaOptions};

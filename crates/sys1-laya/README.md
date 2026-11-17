@@ -78,6 +78,18 @@ The router is heuristic in v1; full official routing golden parity is pending.
 server can add models; `unregister` drops a mapping. Registering an existing
 name keeps the first registration — unregister first to replace it.
 
+## Checkpoint helpers
+
+Checkpoint layout knowledge lives here so composition layers do not have to
+define Laya-prefixed APIs:
+
+- `is_checkpoint_directory` / `has_checkpoint_variants`
+- `variant_directories` — the three catalog names and paths of a repository root
+- `local_checkpoint_manifest` — manifest plus file map for a bare checkpoint
+  directory without `model.json`
+- `register_checkpoint_bundle` — registers a single checkpoint or a router
+  bundle with the factory and returns the manifests to add to a registry
+
 ## Parity
 
 Golden tests compare `input_ids`, `markers`, logits, and answers against the

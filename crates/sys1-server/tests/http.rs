@@ -41,7 +41,7 @@ impl DecisionModel for FakeModel {
                 }
                 Question::Box(_) => {
                     return Err(ModelError::unsupported(
-                        "Laya does not support box questions",
+                        "this model does not support box questions",
                     ));
                 }
             };

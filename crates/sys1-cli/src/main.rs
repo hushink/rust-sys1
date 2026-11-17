@@ -6,7 +6,7 @@ use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
 use config::LoadedConfig;
 use indexmap::IndexMap;
-use source::{LayaResolver, register_pulled};
+use source::HubModelResolver;
 use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
@@ -15,12 +15,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use sys1_core::{
-    DecisionModel, DevicePreference, ModelFile, ModelManifest, ModelRegistry, ModelResolver,
-    Questions, RegistryConfig,
+    DecisionModel, DevicePreference, ModelManifest, ModelRegistry, ModelResolver, Questions,
+    RegistryConfig,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
-    ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory, LayaModel, LayaOptions, set_tf32,
+    ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory as CheckpointFactory,
+    LayaModel as CheckpointModel, LayaOptions as ModelOptions, has_checkpoint_variants,
+    is_checkpoint_directory, local_checkpoint_manifest, register_checkpoint_bundle, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{BatchConfig, ServerConfig, serve_with_resolver};
@@ -244,7 +246,7 @@ fn serve_command(
     let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
-    let options = make_laya_options(
+    let options = make_model_options(
         &device,
         &dtype,
         max_len,
@@ -271,7 +273,7 @@ fn serve_command(
             "starting with an empty catalog; add models with `POST /api/models` or `sys1 pull`"
         );
     }
-    let resolver: Arc<dyn ModelResolver> = Arc::new(LayaResolver::new(
+    let resolver: Arc<dyn ModelResolver> = Arc::new(HubModelResolver::new(
         hub,
         factory.clone(),
         options,
@@ -345,7 +347,7 @@ fn run_command(
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
     let hub = make_hub(cache, offline, config)?;
-    let options = make_laya_options(
+    let options = make_model_options(
         &device,
         &dtype,
         max_len,
@@ -373,7 +375,7 @@ fn run_command(
     .context("invalid questions")?;
     let questions = Questions::from(questions);
 
-    let model = LayaModel::load_dir(&pulled.directory, options)?;
+    let model = CheckpointModel::load_dir(&pulled.directory, options)?;
     let output = model.predict(&state, &questions)?;
     let response = SystemOneResponse {
         model: pulled.manifest.name,
@@ -468,15 +470,15 @@ fn make_hub(cache: Option<&Path>, offline: bool, loaded: &LoadedConfig) -> anyho
     Ok(Hub::new(config)?)
 }
 
-fn make_laya_options(
+fn make_model_options(
     device: &str,
     dtype: &str,
     max_len: Option<usize>,
     confidence: &str,
     local_window: bool,
     max_attention_elements: usize,
-) -> anyhow::Result<LayaOptions> {
-    Ok(LayaOptions {
+) -> anyhow::Result<ModelOptions> {
+    Ok(ModelOptions {
         device: resolve_device(device)?,
         dtype: parse_dtype(dtype)?,
         max_len,
@@ -549,25 +551,27 @@ fn parse_confidence(value: &str) -> anyhow::Result<ConfidenceMode> {
 fn build_models(
     hub: &Hub,
     specs: &[String],
-    options: LayaOptions,
-) -> anyhow::Result<(Vec<ModelManifest>, Arc<LayaFactory>)> {
-    let factory = Arc::new(LayaFactory::new());
+    options: ModelOptions,
+) -> anyhow::Result<(Vec<ModelManifest>, Arc<CheckpointFactory>)> {
+    let factory = Arc::new(CheckpointFactory::new());
     let mut manifests = Vec::new();
     let mut seen = HashSet::new();
 
     if specs.is_empty() {
         for pulled in hub.list_cached()? {
-            if !is_laya_model(&pulled.manifest) {
+            if !is_checkpoint_directory(&pulled.directory) {
                 continue;
             }
-            register_pulled(
+            let registered = register_checkpoint_bundle(
                 &factory,
-                &pulled,
+                &pulled.manifest,
+                &pulled.directory,
                 options.clone(),
                 None,
-                &mut manifests,
-                &mut seen,
-            );
+            )?;
+            for manifest in registered {
+                push_manifest(&mut manifests, &mut seen, manifest);
+            }
         }
         return Ok((manifests, factory));
     }
@@ -575,22 +579,24 @@ fn build_models(
     for spec in specs {
         let (name, reference) = parse_model_spec(spec)?;
         let pulled = pull_model(hub, &reference)?;
-        if !is_laya_model(&pulled.manifest) {
+        if !is_checkpoint_directory(&pulled.directory) {
             bail!("{reference} does not look like a Laya safetensors checkpoint");
         }
-        if name == "laya-latest" && !has_laya_variants(&pulled.directory) {
+        if name == "laya-latest" && !has_checkpoint_variants(&pulled.directory) {
             tracing::warn!(
                 "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
             );
         }
-        register_pulled(
+        let registered = register_checkpoint_bundle(
             &factory,
-            &pulled,
+            &pulled.manifest,
+            &pulled.directory,
             options.clone(),
             Some(&name),
-            &mut manifests,
-            &mut seen,
-        );
+        )?;
+        for manifest in registered {
+            push_manifest(&mut manifests, &mut seen, manifest);
+        }
     }
     Ok((manifests, factory))
 }
@@ -603,28 +609,6 @@ fn push_manifest(
     if seen.insert(manifest.name.clone()) {
         manifests.push(manifest);
     }
-}
-
-fn variant_directories(root: &Path) -> [(&'static str, PathBuf); 3] {
-    [
-        ("laya-english", root.to_path_buf()),
-        ("laya-multilingual", root.join("multilingual")),
-        ("laya-typed-decisions", root.join("typed-decisions")),
-    ]
-}
-
-fn has_laya_variants(root: &Path) -> bool {
-    is_laya_directory(root)
-        && is_laya_directory(&root.join("multilingual"))
-        && is_laya_directory(&root.join("typed-decisions"))
-}
-
-fn is_laya_directory(directory: &Path) -> bool {
-    directory.join("model.safetensors").is_file()
-        && directory.join("encoder/config.json").is_file()
-        && directory.join("rl_agent_config.json").is_file()
-        && (directory.join("tokenizer/tokenizer.json").is_file()
-            || directory.join("tokenizer.json").is_file())
 }
 
 fn parse_model_spec(spec: &str) -> anyhow::Result<(String, String)> {
@@ -651,79 +635,12 @@ fn pull_model(hub: &Hub, reference: &str) -> anyhow::Result<PulledModel> {
 }
 
 fn synthesise_local(directory: &Path) -> anyhow::Result<PulledModel> {
-    let required = [
-        "model.safetensors",
-        "encoder/config.json",
-        "rl_agent_config.json",
-        "tokenizer/tokenizer.json",
-    ];
-    for path in required {
-        if !directory.join(path).is_file() {
-            bail!("{} is missing {path}", directory.display());
-        }
-    }
-
-    let mut files = Vec::new();
-    for path in [
-        "model.safetensors",
-        "encoder/config.json",
-        "rl_agent_config.json",
-        "tokenizer/tokenizer.json",
-        "tokenizer/tokenizer_config.json",
-    ] {
-        let full = directory.join(path);
-        if !full.is_file() {
-            continue;
-        }
-        let size = fs::metadata(&full)
-            .with_context(|| format!("metadata for {}", full.display()))?
-            .len();
-        files.push(ModelFile {
-            path: path.to_owned(),
-            url: String::new(),
-            sha256: None,
-            git_sha1: None,
-            size,
-        });
-    }
-
-    let name = directory
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("laya")
-        .to_owned();
-    let manifest = ModelManifest {
-        schema_version: 1,
-        name,
-        description: format!("Local Laya checkpoint at {}", directory.display()),
-        release_date: "1970-01-01".to_owned(),
-        family: "laya".to_owned(),
-        variant: None,
-        backend: "candle".to_owned(),
-        format: "safetensors".to_owned(),
-        version: "local".to_owned(),
-        aliases: Vec::new(),
-        files,
-    };
-    manifest.validate()?;
-
-    let mut file_map = IndexMap::new();
-    for file in &manifest.files {
-        file_map.insert(file.path.clone(), directory.join(&file.path));
-    }
+    let (manifest, files) = local_checkpoint_manifest(directory)?;
     Ok(PulledModel {
         manifest,
         directory: directory.to_path_buf(),
-        files: file_map,
+        files,
     })
-}
-
-fn is_laya_model(manifest: &ModelManifest) -> bool {
-    let has = |path: &str| manifest.files.iter().any(|file| file.path == path);
-    has("model.safetensors")
-        && has("encoder/config.json")
-        && has("rl_agent_config.json")
-        && (has("tokenizer/tokenizer.json") || has("tokenizer.json"))
 }
 
 fn read_input(input: &str) -> anyhow::Result<String> {

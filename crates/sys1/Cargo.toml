@@ -12,6 +12,10 @@ sys1-core = { path = "../sys1-core" }
 sys1-protocol = { path = "../sys1-protocol" }
 sys1-hub = { path = "../sys1-hub", optional = true }
 sys1-laya = { path = "../sys1-laya", optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [features]
 default = ["laya", "hub"]

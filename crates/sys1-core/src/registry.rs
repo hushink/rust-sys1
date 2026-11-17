@@ -1,4 +1,4 @@
-use crate::{Error, ManifestError, ModelFactory, ModelManifest, Questions};
+use crate::{DecisionOutput, Error, ManifestError, ModelFactory, ModelManifest, Questions};
 use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -266,13 +266,39 @@ impl ModelRegistry {
         Ok(model)
     }
 
-    /// Validate, resolve, load, and run a prediction.
+    /// Validate, resolve, load, and run a prediction, returning typed answers.
+    pub fn predict_output(
+        &self,
+        name: &str,
+        state: &State,
+        questions: &Questions,
+    ) -> Result<DecisionOutput, Error> {
+        self.predict_inner(name, state, questions)
+            .map(|(_, output)| output)
+    }
+
+    /// Validate, resolve, load, and run a prediction, returning the official
+    /// response shape with the canonical model name.
     pub fn predict(
         &self,
         name: &str,
         state: &State,
         questions: &Questions,
     ) -> Result<SystemOneResponse, Error> {
+        let (canonical, output) = self.predict_inner(name, state, questions)?;
+        Ok(SystemOneResponse {
+            model: canonical,
+            answers: output.answers.into_map(),
+            usage: output.usage,
+        })
+    }
+
+    fn predict_inner(
+        &self,
+        name: &str,
+        state: &State,
+        questions: &Questions,
+    ) -> Result<(String, DecisionOutput), Error> {
         questions.validate()?;
         self.maintenance();
 
@@ -286,12 +312,7 @@ impl ModelRegistry {
                 model: canonical.clone(),
                 source,
             })?;
-
-        Ok(SystemOneResponse {
-            model: canonical,
-            answers: output.answers.into_map(),
-            usage: output.usage,
-        })
+        Ok((canonical, output))
     }
 
     /// Unload a model, returning whether it was resident.

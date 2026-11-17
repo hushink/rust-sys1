@@ -12,6 +12,7 @@
 
 - 官方 API 严格兼容：`POST /v1/systemone`、`GET /v1/models`；错误体使用官方 `detail` 形状。
 - 进程内推理：typed `Questions` / `Answers`，不经过 HTTP 与序列化。
+- `InferenceEngine`：一个对象串起 hub、manifest、后端 factory、注册表与 typed 推理。
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
 - 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁。
@@ -29,7 +30,7 @@
 | [`sys1-laya`](crates/sys1-laya/README.zh-CN.md) | clean-room Laya 实现与 Router |
 | [`sys1-server`](crates/sys1-server/README.zh-CN.md) | axum `/v1/*` 与 `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.zh-CN.md) | `sys1` 二进制：serve/pull/list/show/rm/run/doctor |
-| [`sys1`](crates/sys1/README.zh-CN.md) | umbrella 进程内 API |
+| [`sys1`](crates/sys1/README.zh-CN.md) | umbrella 进程内引擎 API |
 
 每个 crate 都提供英文 `README.md` 与中文 `README.zh-CN.md`。
 
@@ -165,19 +166,31 @@ curl http://127.0.0.1:8080/v1/systemone \
 
 ```rust
 use std::path::Path;
-use sys1::{DecisionModel, LayaModel, LayaOptions, Questions, State};
+use sys1::{EngineOptions, InferenceEngine, Questions, State};
 
-let model = LayaModel::load_dir(Path::new("/path/to/laya"), LayaOptions::default())?;
+let engine = InferenceEngine::from_directory(
+    Path::new("/path/to/laya-multilingual"),
+    EngineOptions::default(),
+)?;
 let state = State::text("I was charged twice. Please refund me today.");
 let questions = Questions::new()
     .choice("tone", [("angry", "Hostile"), ("calm", "Neutral")])
     .noul("billing", "Is this about billing?");
 
-let output = model.predict(&state, &questions)?;
+let output = engine.predict("laya-multilingual", &state, &questions)?;
 let tone = output.answers.choice("tone")?;
 let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`EngineOptions` 按 `hub`（缓存、端点、凭据）、`registry`（LRU/keep-alive）与
+`model`（`ModelOptions`：device、dtype、上下文长度、confidence、attention）分组。
+`engine.add("hf:...")` / `add_as` 注册引用，`load` / `unload` 控制常驻，
+`models` / `model` 查看目录，`predict_batch` 执行原生 batch，`systemone`
+返回官方 wire response。Engine 实现了 `ModelResolver`，因此也可作为服务端
+`/api/models` 运行时管理的 resolver。
+
+umbrella 根模块不再导出 Laya 前缀类型；Laya 相关辅助仍位于 `sys1::laya`。
 
 ## 兼容性说明
 
