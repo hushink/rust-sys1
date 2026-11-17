@@ -428,10 +428,7 @@ impl JointHead {
                 )
                 .map_err(inference_error)?
                 .broadcast_add(
-                    &self
-                        .option_question_projection
-                        .forward(&question_vector)
-                        .map_err(inference_error)?
+                    &project_vector(&self.option_question_projection, &question_vector)?
                         .unsqueeze(0)
                         .map_err(inference_error)?,
                 )
@@ -489,10 +486,7 @@ impl JointHead {
             )
             .map_err(inference_error)?
             .broadcast_add(
-                &self
-                    .global_projection
-                    .forward(&global)
-                    .map_err(inference_error)?
+                &project_vector(&self.global_projection, &global)?
                     .unsqueeze(0)
                     .map_err(inference_error)?,
             )
@@ -513,8 +507,7 @@ impl JointHead {
         let prior_scale = self.prior_scale.min(100f32.ln()).exp();
         let joint_scale = self.joint_scale.min(100f32.ln()).exp();
         let gate = candle_nn::ops::sigmoid(
-            &Tensor::from_vec(vec![self.residual_gate], 1, hidden.device())
-                .map_err(inference_error)?,
+            &Tensor::new(self.residual_gate, hidden.device()).map_err(inference_error)?,
         )
         .map_err(inference_error)?
         .to_scalar::<f32>()
@@ -597,6 +590,14 @@ impl JointHead {
         }
         Ok(output)
     }
+}
+
+fn project_vector(linear: &Linear, values: &Tensor) -> Result<Tensor, ModelError> {
+    linear
+        .forward(&values.unsqueeze(0).map_err(inference_error)?)
+        .map_err(inference_error)?
+        .squeeze(0)
+        .map_err(inference_error)
 }
 
 fn mean_span(values: &Tensor, start: usize, end: usize) -> Result<Tensor, ModelError> {
@@ -738,6 +739,8 @@ impl ClefModel {
         id: &str,
         question: &Question,
     ) -> Result<Vec<(String, Option<Value>)>, ModelError> {
+        let description =
+            |value: &Content| (!matches!(value, Content::Null)).then(|| content_to_value(value));
         match question {
             Question::Noul(noul) => {
                 let mut criteria = Map::new();
@@ -766,7 +769,7 @@ impl ClefModel {
                 entries.sort_by(|left, right| left.0.cmp(right.0));
                 Ok(entries
                     .into_iter()
-                    .map(|(key, value)| (key.clone(), Some(content_to_value(value))))
+                    .map(|(key, value)| (key.clone(), description(value)))
                     .collect())
             }
             Question::Score(score) => {
@@ -779,7 +782,7 @@ impl ClefModel {
                     .criteria
                     .iter()
                     .enumerate()
-                    .map(|(index, value)| (index.to_string(), Some(content_to_value(value))))
+                    .map(|(index, value)| (index.to_string(), description(value)))
                     .collect())
             }
             Question::Box(_) => Err(ModelError::invalid_request(format!(

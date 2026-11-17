@@ -38,4 +38,6 @@ hybrid decoder；Qwen3Guard 使用 dense Qwen3。若每个 family 各自实现 d
 向下传递。Qwen3 在 [151644] / [151644,872] 上与 transformers 对齐；
 Qwen3.5 在单 chunk 与 130-token 多 chunk 行上与 transformers 对齐；
 Qwen3Guard、Von、Decima、Kev、Decision 的 Python 参考输出均在 1e-3 内。
-Clef 的 9B 权重未在开发机验证，保留 ignored 测试与真实 checkpoint 入口。
+Clef 9B 已在开发机上以 CPU + BF16 加载真实 `clef-flash` checkpoint：四个
+shard 的 SHA256 与 Hugging Face 一致，triage 请求的决策与 Ollaya 记录的
+integration corpus 相同（单次推理约 51 s）；12 GB 显存放不下 BF16 主干。

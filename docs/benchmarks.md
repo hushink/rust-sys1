@@ -98,9 +98,9 @@ scorer 前向，长度不同则保持独立，避免 padding 改变编码器的�
 
 ## 结论与后续
 
-- **编码器**：单请求 CUDA 普遍快 1.5–8 倍；但 8 路并发时，F32 的小模型在
-  CPU 上反而有更高吞吐。部署时应按“低延迟单请求 → CUDA，高并发小模型 →
-  CPU”选择。
+- **编码器**：单请求 CUDA 通常快 1.5–8 倍（GLiClass 例外：CPU 15.1 ms，
+  CUDA 18.7 ms）；8 路并发时 NLI/GLiClass/Decima-small 的 CPU 吞吐反而更高，
+  Von 与 Decima-base 仍是 CUDA 更好。部署时应按模型和并发度实测选择。
 - **Qwen3Guard（dense Qwen3）**：GPU 收益最大，单请求 1.68 s → 95 ms。
 - **Kev / Decision（Qwen3.5 hybrid）**：CUDA 单请求 4.4 s，比 CPU 的
   0.79 s / 1.46 s 慢约 3–5 倍。原因是 Gated DeltaNet 目前按 chunk 用普通
@@ -108,17 +108,35 @@ scorer 前向，长度不同则保持独立，避免 padding 改变编码器的�
   没有改善（4.35 s vs 4.40 s）。在引入 fused delta-rule kernel 之前，这两族
   在短请求上建议使用 CPU，或在 GPU 上批量合并更大的请求以摊薄开销。
 - **F16**：CUDA F16 路径在 NLI/Von/GLiClass 上暴露过 dtype 与 contiguous
-  问题，已修复（mask 转 dtype、encoder/scorer 输入 contiguous）。本轮表格
-  仍统一使用 F32，以便与 CPU 对比；F16 的吞吐提升需要单独复测。
+  问题，已修复（mask 转 dtype、encoder/scorer 输入 contiguous）。修复后
+  单请求 `noul` p50：NLI 15.7 ms、GLiClass 9.5 ms、Von 22.4 ms、
+  Decima-small 15.7 ms、Qwen3Guard 89.3 ms，均优于同模型 F32；Kev/Decision
+  仍约 4.4 s，说明瓶颈是 Qwen3.5 的主机侧调度而不是数值格式。
 - **Clef 9B**：权重约 18.8 GB，超出 12 GiB 显存；CPU F32 需要约 36 GB 内存。
   使用 BF16 CPU 的验证结果见下一节（下载/验证完成后更新）。
 
 ## Clef 9B 验证
 
-待 18.8 GB checkpoint 下载完成后补充：
+`Cloudflare/clef-flash` 的四个 BF16 shard 共约 18.8 GB，下载后与 Hugging Face
+LFS SHA256 全部一致。12 GiB 显存放不下主干，因此使用 CPU + BF16 验证：
 
 ```bash
 $env:SYS1_CLEF_TEST_DIR="C:/Users/hushink/AppData/Local/Temp/sys1-clef"
 $env:SYS1_CLEF_DTYPE="bf16"
-cargo test -p sys1-clef --test clef -- --ignored --nocapture
+cargo test --release -p sys1-clef --test clef matches_the_recorded_triage_decisions \
+  -- --ignored --nocapture --test-threads=1
 ```
+
+结果：
+
+- 加载约 20 s，峰值工作集约 18–19 GB。
+- 单次 triage 请求（5 个问题）`predict` 耗时 **50.9 s**（CPU BF16）。
+- 决策与 Ollaya 记录的 `clef-flash-fp16` integration corpus 一致：
+  `team=billing`、`refund/urgent/churn=true`、`upset` 的 argmax 为第 4 档
+  （索引 3）。
+- 这次验证还暴露并修复了两个真实 checkpoint 才会触发的问题：head 中
+  4096 维向量的 Linear 需要先升到二维，`residual_gate` 需要以 0 维张量
+  做 sigmoid。
+
+GPU 上需要至少 24 GB 显存（BF16 权重约 18 GB，4096-token 请求峰值约
+22.8 GB）；RTX 3060 12 GB 不适用。

@@ -43,11 +43,16 @@ model-*.safetensors          # Qwen3.5 shards (vision tensors are ignored)
 ```
 
 The 9B `clef-flash` needs roughly 18 GB in BF16. Use `dtype = "bf16"` and a GPU
-for practical latency and memory.
+for practical latency and memory; on a 12 GB card the backbone does not fit, so
+the tests below use BF16 on the CPU (about 30 GB of RAM is required).
 
 ## Test
 
 ```bash
 $env:SYS1_CLEF_TEST_DIR="C:/models/clef-flash"
-cargo test --offline -p sys1-clef --test clef -- --ignored --nocapture
+cargo test --release --offline -p sys1-clef --test clef -- --ignored --nocapture
 ```
+
+Set `SYS1_CLEF_DTYPE=bf16` for the 9B checkpoint (the default test dtype is
+F32). `matches_the_recorded_triage_decisions` compares the choice/noul/score
+decisions with Ollaya's recorded `clef-flash` integration corpus.

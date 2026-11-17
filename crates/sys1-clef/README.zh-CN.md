@@ -38,10 +38,15 @@ model-*.safetensors          # Qwen3.5 分片（vision tensor 不使用）
 ```
 
 9B 的 `clef-flash` BF16 约 18 GB；实际使用建议 `dtype = "bf16"` 并配合 GPU。
+12 GB 显存放不下 9B 主干，因此下列测试使用 CPU + BF16（约需 30 GB 内存）。
 
 ## 测试
 
 ```bash
 $env:SYS1_CLEF_TEST_DIR="C:/models/clef-flash"
-cargo test --offline -p sys1-clef --test clef -- --ignored --nocapture
+cargo test --release --offline -p sys1-clef --test clef -- --ignored --nocapture
 ```
+
+9B checkpoint 需设置 `SYS1_CLEF_DTYPE=bf16`（默认测试 dtype 为 F32）。
+`matches_the_recorded_triage_decisions` 用 Ollaya 记录的 `clef-flash`
+integration corpus 校验 choice/noul/score 的决策。
