@@ -15,8 +15,16 @@ fn checkpoint(directory: &Path) {
 
 fn sys1() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sys1"));
-    command.env_remove("SYS1_CONFIG");
-    command.env_remove("SYS1_CACHE");
+    for key in [
+        "SYS1_CONFIG",
+        "SYS1_CACHE",
+        "SYS1_LOG_LEVEL",
+        "SYS1_LOG_FORMAT",
+        "SYS1_LOG_FILE",
+        "RUST_LOG",
+    ] {
+        command.env_remove(key);
+    }
     command
 }
 
@@ -172,6 +180,46 @@ fn serve_fails_when_a_preload_model_is_unknown() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("preload model `missing`"), "{stderr}");
+}
+
+#[test]
+fn invalid_log_format_fails() {
+    let output = sys1()
+        .args(["--log-format", "pretty", "doctor"])
+        .output()
+        .expect("run sys1 doctor");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unsupported log format"), "{stderr}");
+}
+
+#[test]
+fn json_logs_can_be_written_to_a_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let log = dir.path().join("logs").join("sys1.log");
+
+    let output = sys1()
+        .args([
+            "--log-format",
+            "json",
+            "--log-level",
+            "info",
+            "--log-file",
+            log.to_str().unwrap(),
+            "doctor",
+        ])
+        .output()
+        .expect("run sys1 doctor");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("rust-sys1 doctor"), "{stdout}");
+    let logs = fs::read_to_string(&log).expect("log file");
+    assert!(logs.contains("sys1 starting"), "{logs}");
+    assert!(logs.contains("\"level\""), "{logs}");
 }
 
 #[test]

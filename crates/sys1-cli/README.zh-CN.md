@@ -58,6 +58,9 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --metrics                  # 强制开启 /metrics 与 /api/metrics
 --no-metrics               # 关闭 /metrics 与 /api/metrics
 --preload <name>           # 启动前加载，可重复
+--log-level <filter>       # 或 SYS1_LOG_LEVEL / RUST_LOG
+--log-format text|json     # 或 SYS1_LOG_FORMAT
+--log-file <file>          # 或 SYS1_LOG_FILE；追加到文件而非 stdout
 --offline
 --cache <dir>              # 或 SYS1_CACHE
 ```
@@ -122,6 +125,9 @@ batch_max = 32
 max_attention_elements = 67108864
 metrics = true
 preload = ["laya-latest"]
+log_level = "info"
+log_format = "text"          # text | json
+# log_file = "logs/sys1.log"
 
 [models]
 laya-latest = "local:D:/models/laya"
@@ -130,6 +136,26 @@ laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 
 完整示例见 [`sys1.toml.example`](../../sys1.toml.example)。相对 local 路径按
 配置文件所在目录解析；`[models]` 中的名称也可用于 `pull`、`show`、`rm`、`run`。
+
+## 日志与追踪
+
+CLI 负责安装 `tracing` subscriber；各库只发事件，嵌入方可自行选择 subscriber。
+CLI 支持 text/JSON、追加文件与过滤器：
+
+```toml
+[server]
+log_level = "info"           # 也支持 sys1=debug,tower_http=info
+log_format = "json"
+log_file = "logs/sys1.log"   # 相对配置文件解析
+```
+
+优先级：CLI 参数 / `SYS1_LOG_LEVEL` / `SYS1_LOG_FORMAT` / `SYS1_LOG_FILE` >
+过滤器使用 `RUST_LOG` > `[server]` > 默认。JSON 日志包含服务端 telemetry 事件
+的 `request_id` 与 `trace_id` 字段。
+
+`/v1/systemone` 接受 W3C `traceparent`，并在响应中返回新的 `traceparent`
+（trace id 不变，server span id 重新生成）。所有响应仍带
+`x-typesafe-request-id`；两个 id 会同时出现在日志与 admin 模型/缓存审计事件中。
 
 ## 压测工具
 

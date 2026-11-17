@@ -60,6 +60,12 @@ pub struct ServerSection {
     /// Models to load before serving. Names may be aliases from `[models]`.
     #[serde(default)]
     pub preload: Vec<String>,
+    /// `tracing` filter, e.g. `info` or `sys1=debug,tower_http=info`.
+    pub log_level: Option<String>,
+    /// `text` or `json`.
+    pub log_format: Option<String>,
+    /// Append logs to this file instead of stdout. Relative to this config.
+    pub log_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -122,6 +128,9 @@ pub fn load(explicit: Option<&Path>) -> anyhow::Result<LoadedConfig> {
 
     if let Some(cache) = value.hub.cache_dir.take() {
         value.hub.cache_dir = Some(resolve_path(&base_dir, &cache));
+    }
+    if let Some(log_file) = value.server.log_file.take() {
+        value.server.log_file = Some(resolve_path(&base_dir, &log_file));
     }
     for reference in value.models.values_mut() {
         *reference = resolve_reference(&base_dir, reference);
@@ -199,6 +208,9 @@ mod tests {
             local_window = true
             metrics = false
             preload = ["laya-latest"]
+            log_level = "debug"
+            log_format = "json"
+            log_file = "logs/sys1.log"
 
             [models]
             laya-latest = "local:D:/models/laya"
@@ -207,6 +219,12 @@ mod tests {
         assert_eq!(config.server.batch_max, Some(64));
         assert_eq!(config.server.metrics, Some(false));
         assert_eq!(config.server.preload, vec!["laya-latest".to_owned()]);
+        assert_eq!(config.server.log_level.as_deref(), Some("debug"));
+        assert_eq!(config.server.log_format.as_deref(), Some("json"));
+        assert_eq!(
+            config.server.log_file.as_deref(),
+            Some(std::path::Path::new("logs/sys1.log"))
+        );
         assert_eq!(
             config.models.get("laya-latest").map(String::as_str),
             Some("local:D:/models/laya")

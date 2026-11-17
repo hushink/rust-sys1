@@ -16,7 +16,8 @@ use sys1_protocol::{
     SystemOneResponse, Usage,
 };
 use sys1_server::{
-    BatchConfig, CacheManager, CachedFile, CachedModel, ServerConfig, router,
+    BatchConfig, BatchEvent, CacheEvent, CacheManager, CachedFile, CachedModel, ModelAction,
+    ModelEvent, RequestEvent, ServerConfig, ServerExtensions, Telemetry, router,
     router_with_extensions, router_with_resolver,
 };
 use tower::ServiceExt;
@@ -197,6 +198,44 @@ impl CacheManager for FakeCache {
         let before = models.len();
         models.retain(|model| model.key != key);
         Ok(models.len() != before)
+    }
+}
+
+#[derive(Default)]
+struct RecordingTelemetry {
+    requests: Mutex<Vec<RequestEvent>>,
+    models: Mutex<Vec<ModelEvent>>,
+    batches: Mutex<Vec<BatchEvent>>,
+    caches: Mutex<Vec<CacheEvent>>,
+}
+
+impl Telemetry for RecordingTelemetry {
+    fn on_request(&self, event: &RequestEvent) {
+        self.requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.clone());
+    }
+
+    fn on_model(&self, event: &ModelEvent) {
+        self.models
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.clone());
+    }
+
+    fn on_batch(&self, event: &BatchEvent) {
+        self.batches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.clone());
+    }
+
+    fn on_cache(&self, event: &CacheEvent) {
+        self.caches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.clone());
     }
 }
 
@@ -438,7 +477,8 @@ async fn concurrent_requests_are_batched() {
         )
         .expect("registry"),
     );
-    let app = router(
+    let telemetry = Arc::new(RecordingTelemetry::default());
+    let app = router_with_extensions(
         registry,
         ServerConfig {
             batching: Some(BatchConfig {
@@ -447,6 +487,10 @@ async fn concurrent_requests_are_batched() {
             }),
             enable_metrics: true,
             ..ServerConfig::default()
+        },
+        ServerExtensions {
+            telemetry: Some(telemetry.clone()),
+            ..ServerExtensions::default()
         },
     );
 
@@ -473,6 +517,16 @@ async fn concurrent_requests_are_batched() {
     assert_eq!(value["batching"]["items"], 4);
     assert!(value["batching"]["batches"].as_u64().unwrap() >= 1);
     assert!(value["models"]["loads"].as_u64().unwrap() >= 1);
+
+    let batch_events = telemetry
+        .batches
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert!(!batch_events.is_empty());
+    assert_eq!(
+        batch_events.iter().map(|event| event.items).sum::<usize>(),
+        4
+    );
 }
 
 #[tokio::test]
@@ -837,6 +891,7 @@ async fn admin_cache_lists_and_removes_entries() {
             cached_model("key-b", "other-model"),
         ]),
     });
+    let telemetry = Arc::new(RecordingTelemetry::default());
     let app = router_with_extensions(
         registry,
         ServerConfig {
@@ -844,8 +899,11 @@ async fn admin_cache_lists_and_removes_entries() {
             batching: None,
             ..ServerConfig::default()
         },
-        None,
-        Some(cache),
+        ServerExtensions {
+            cache: Some(cache),
+            telemetry: Some(telemetry.clone()),
+            ..ServerExtensions::default()
+        },
     );
 
     let (status, _, body) = send(app.clone(), get("/api/cache")).await;
@@ -882,6 +940,21 @@ async fn admin_cache_lists_and_removes_entries() {
     let (_, _, body) = send(app, get("/api/cache")).await;
     let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
     assert!(value["models"].as_array().unwrap().is_empty());
+
+    let events = telemetry
+        .caches
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert!(
+        events
+            .iter()
+            .any(|event| event.action == sys1_server::CacheAction::List && event.success)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event.action == sys1_server::CacheAction::Remove && event.success)
+    );
 }
 
 #[tokio::test]
@@ -897,8 +970,10 @@ async fn cache_api_requires_admin_and_auth() {
     let app = router_with_extensions(
         registry.clone(),
         ServerConfig::default(),
-        None,
-        Some(cache.clone()),
+        ServerExtensions {
+            cache: Some(cache.clone()),
+            ..ServerExtensions::default()
+        },
     );
     let (status, _, _) = send(app, get("/api/cache")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -911,8 +986,10 @@ async fn cache_api_requires_admin_and_auth() {
             batching: None,
             ..ServerConfig::default()
         },
-        None,
-        Some(cache),
+        ServerExtensions {
+            cache: Some(cache),
+            ..ServerExtensions::default()
+        },
     );
     let (status, _, _) = send(app.clone(), get("/api/cache")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -987,6 +1064,76 @@ async fn admin_add_requires_a_resolver() {
             .expect("detail")
             .contains("not configured")
     );
+}
+
+#[tokio::test]
+async fn telemetry_and_trace_context_are_replaceable() {
+    let telemetry = Arc::new(RecordingTelemetry::default());
+    let registry = Arc::new(
+        ModelRegistry::new(
+            vec![manifest("laya-test", &["laya-latest"])],
+            Arc::new(FakeFactory),
+            RegistryConfig::default(),
+        )
+        .expect("registry"),
+    );
+    let app = router_with_extensions(
+        registry,
+        ServerConfig {
+            batching: None,
+            ..ServerConfig::default()
+        },
+        ServerExtensions {
+            telemetry: Some(telemetry.clone()),
+            ..ServerExtensions::default()
+        },
+    );
+
+    let trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/systemone")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("traceparent", format!("00-{trace_id}-00f067aa0ba902b7-01"))
+        .body(Body::from(noul_body()))
+        .expect("request");
+    let (status, headers, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok())
+        .expect("traceparent response header");
+    assert!(
+        traceparent.starts_with(&format!("00-{trace_id}-")),
+        "{traceparent}"
+    );
+    assert!(traceparent.ends_with("-01"), "{traceparent}");
+    let request_id = headers
+        .get("x-typesafe-request-id")
+        .and_then(|value| value.to_str().ok())
+        .expect("request id header");
+
+    let requests = telemetry
+        .requests
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].trace_id, trace_id);
+    assert_eq!(requests[0].request_id, request_id);
+    assert_eq!(requests[0].status, 200);
+    assert_eq!(requests[0].model.as_deref(), Some("laya-test"));
+
+    let models = telemetry
+        .models
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert!(models.iter().any(|event| {
+        event.model == "laya-test"
+            && event.action == ModelAction::Load
+            && event.success
+            && event.trace_id == trace_id
+    }));
 }
 
 #[tokio::test]

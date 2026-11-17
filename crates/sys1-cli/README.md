@@ -58,6 +58,9 @@ Useful flags:
 --metrics                  # force /metrics and /api/metrics on
 --no-metrics               # disable /metrics and /api/metrics
 --preload <name>           # load before serving; repeatable
+--log-level <filter>       # or SYS1_LOG_LEVEL / RUST_LOG
+--log-format text|json     # or SYS1_LOG_FORMAT
+--log-file <file>          # or SYS1_LOG_FILE; append instead of stdout
 --offline
 --cache <dir>              # or SYS1_CACHE
 ```
@@ -129,6 +132,9 @@ batch_max = 32
 max_attention_elements = 67108864
 metrics = true
 preload = ["laya-latest"]
+log_level = "info"
+log_format = "text"          # text | json
+# log_file = "logs/sys1.log"
 
 [models]
 laya-latest = "local:D:/models/laya"
@@ -138,6 +144,28 @@ laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 See [`sys1.toml.example`](../../sys1.toml.example). Relative local paths resolve
 from the config file's directory. `[models]` names also work with `pull`,
 `show`, `rm`, and `run`.
+
+## Logging and tracing
+
+The CLI installs the `tracing` subscriber; the libraries only emit events, so
+embedders can choose their own subscriber. The CLI supports text or JSON logs,
+an optional append-only file, and a filter:
+
+```toml
+[server]
+log_level = "info"           # sys1=debug,tower_http=info also works
+log_format = "json"
+log_file = "logs/sys1.log"   # relative to this config file
+```
+
+Precedence: CLI flags / `SYS1_LOG_LEVEL` / `SYS1_LOG_FORMAT` /
+`SYS1_LOG_FILE` > `RUST_LOG` for the filter > `[server]` > defaults. JSON logs
+include `request_id` and `trace_id` fields from the server telemetry events.
+
+`/v1/systemone` accepts a W3C `traceparent` header and echoes a new
+`traceparent` (same trace id, fresh server span id) on the response. Every
+response also carries `x-typesafe-request-id`; the two ids appear together in
+log events and admin model/cache audit events.
 
 ## Load generator
 

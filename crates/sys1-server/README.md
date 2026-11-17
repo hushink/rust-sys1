@@ -64,14 +64,17 @@ Add disk-cache management with `router_with_extensions` (or
 
 ```rust
 use std::sync::Arc;
-use sys1_server::{CacheManager, router_with_extensions};
+use sys1_server::{ServerExtensions, TracingTelemetry, router_with_extensions};
 
-let cache: Arc<dyn CacheManager> = Arc::new(my_cache);
+let extensions = ServerExtensions {
+    resolver: Some(resolver),
+    cache: Some(Arc::new(my_cache)),
+    telemetry: Some(Arc::new(TracingTelemetry)),
+};
 let app = router_with_extensions(
     registry,
     ServerConfig { enable_admin: true, ..ServerConfig::default() },
-    Some(resolver),
-    Some(cache),
+    extensions,
 );
 ```
 
@@ -128,6 +131,44 @@ configured. Latency sums are milliseconds; Prometheus can divide by the
 matching request/batch/load counter for means. Counters start when the HTTP
 server starts: a model loaded by `sys1 serve --preload` appears in
 `loaded`/`loaded_count` but not in `sys1_model_loads_total`.
+
+## Telemetry and trace context
+
+`sys1-server` never installs a `tracing` subscriber. It emits `tracing` spans
+and events, and it can call a replaceable structured sink:
+
+- Embedders can install any `tracing` subscriber, or pass a custom
+  `Telemetry` implementation through
+  `ServerExtensions { telemetry: Some(Arc::new(my_sink)) }` to
+  `router_with_extensions` / `serve_with_extensions`.
+- Events: `RequestEvent`, `ModelEvent`, `BatchEvent`, and `CacheEvent`, all
+  carrying `request_id`/`trace_id` where applicable.
+- `NoopTelemetry` is the library default; `TracingTelemetry` logs structured
+  events on the `sys1.telemetry` target and is what the CLI uses.
+- `sys1 serve` configures text or JSON logs, an optional append-only file, and
+  filters via `--log-*` / `SYS1_LOG_*` / `[server] log_*`.
+
+A custom sink only needs the methods it cares about:
+
+```rust
+use sys1_server::{ModelEvent, Telemetry};
+
+struct Audit;
+impl Telemetry for Audit {
+    fn on_model(&self, event: &ModelEvent) {
+        eprintln!(
+            "{} {} success={} by {}",
+            event.action, event.model, event.success, event.request_id
+        );
+    }
+}
+```
+
+Each HTTP response receives a W3C `traceparent` header. A valid incoming
+`traceparent` keeps its 128-bit trace id; the server generates a fresh 64-bit
+span id and preserves the sampled flag. Requests without one get a new trace
+id. The existing `x-typesafe-request-id` header remains, and both ids appear in
+request/model/cache telemetry events and in the `systemone` tracing span.
 
 ## Behavior
 

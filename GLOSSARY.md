@@ -34,6 +34,14 @@ _Avoid_: SDK、local server
 把模型获取、manifest、后端加载、模型目录与类型化推理组合起来的高层入口；调用方通过它加载、卸载和运行模型。
 _Avoid_: Model、registry、server
 
+**Telemetry sink（遥测出口）**：
+接收结构化请求、模型、batch、缓存事件的替换点；用于日志、审计或外部追踪系统，不参与推理结果。
+_Avoid_: Logger（仅指文本日志时）、metrics（指标是另一类聚合数据）
+
+**Trace context（追踪上下文）**：
+一次请求的关联标识，包含 128-bit trace id、server span id 与 request id，用于把日志、事件与响应串联起来。
+_Avoid_: Request id（仅指单个请求 id 时）、session
+
 **Client SDK**：
 通过 HTTP 调用 System One API 的客户端库，例如 jev-sdk-rs。
 _Avoid_: In-process inference API

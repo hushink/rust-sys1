@@ -3,9 +3,13 @@ use crate::cache::{CacheManager, CachedModel};
 use crate::config::{BatchConfig, ServerConfig};
 use crate::error::{ApiError, map_model_error, map_registry_error};
 use crate::metrics::Metrics;
+use crate::telemetry::{
+    BatchEvent, CacheAction, CacheEvent, ModelAction, ModelEvent, NoopTelemetry, RequestEvent,
+    TRACEPARENT_HEADER, Telemetry, TraceContext,
+};
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Extension, Path, Request, State};
 use axum::http::{
     HeaderMap, HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION, header::CONTENT_TYPE,
 };
@@ -27,6 +31,7 @@ use sys1_protocol::{
 use tokio::sync::{mpsc, oneshot};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
+use tracing::Instrument;
 use uuid::Uuid;
 
 struct BatchItem {
@@ -46,7 +51,19 @@ pub struct AppState {
     /// Serializes catalog mutations so add/remove snapshots cannot interleave.
     admin_lock: Arc<tokio::sync::Mutex<()>>,
     metrics: Arc<Metrics>,
+    telemetry: Arc<dyn Telemetry>,
     batch: Option<mpsc::Sender<BatchItem>>,
+}
+
+/// Optional runtime integrations for an embedded server.
+#[derive(Clone, Default)]
+pub struct ServerExtensions {
+    /// Enables `/api/models` additions from external references.
+    pub resolver: Option<Arc<dyn ModelResolver>>,
+    /// Enables `/api/cache` disk-cache management.
+    pub cache: Option<Arc<dyn CacheManager>>,
+    /// Structured request/model/batch/cache events. Defaults to a no-op.
+    pub telemetry: Option<Arc<dyn Telemetry>>,
 }
 
 pub fn router(registry: Arc<ModelRegistry>, config: ServerConfig) -> Router {
@@ -60,20 +77,38 @@ pub fn router_with_resolver(
     config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
 ) -> Router {
-    router_with_extensions(registry, config, resolver, None)
+    router_with_extensions(
+        registry,
+        config,
+        ServerExtensions {
+            resolver,
+            ..ServerExtensions::default()
+        },
+    )
 }
 
-/// Build a router with runtime model resolution and/or disk-cache management.
+/// Build a router with runtime model resolution, disk-cache management, and/or
+/// custom telemetry.
 pub fn router_with_extensions(
     registry: Arc<ModelRegistry>,
     config: ServerConfig,
-    resolver: Option<Arc<dyn ModelResolver>>,
-    cache: Option<Arc<dyn CacheManager>>,
+    extensions: ServerExtensions,
 ) -> Router {
+    let ServerExtensions {
+        resolver,
+        cache,
+        telemetry,
+    } = extensions;
+    let telemetry = telemetry.unwrap_or_else(|| Arc::new(NoopTelemetry));
     let metrics = Arc::new(Metrics::new());
     let batch = config.batching.as_ref().map(|batch| {
         let (sender, receiver) = mpsc::channel(batch.max_batch.saturating_mul(4).max(16));
-        tokio::spawn(run_batcher(receiver, batch.clone(), metrics.clone()));
+        tokio::spawn(run_batcher(
+            receiver,
+            batch.clone(),
+            metrics.clone(),
+            telemetry.clone(),
+        ));
         sender
     });
 
@@ -103,6 +138,7 @@ pub fn router_with_extensions(
 
     app.layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
+        .layer(axum::middleware::from_fn(trace_context_layer))
         .with_state(AppState {
             registry,
             config,
@@ -110,8 +146,21 @@ pub fn router_with_extensions(
             cache,
             admin_lock: Arc::new(tokio::sync::Mutex::new(())),
             metrics,
+            telemetry,
             batch,
         })
+}
+
+async fn trace_context_layer(mut request: Request, next: axum::middleware::Next) -> Response {
+    let context = TraceContext::from_headers(request.headers());
+    request.extensions_mut().insert(context.clone());
+    let mut response = next.run(request).await;
+    if let Ok(value) = HeaderValue::from_str(&context.traceparent()) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static(TRACEPARENT_HEADER), value);
+    }
+    response
 }
 
 /// Yield-spin grace period used to discover a burst. This avoids the coarse
@@ -123,6 +172,7 @@ async fn run_batcher(
     mut receiver: mpsc::Receiver<BatchItem>,
     config: BatchConfig,
     metrics: Arc<Metrics>,
+    telemetry: Arc<dyn Telemetry>,
 ) {
     while let Some(first) = receiver.recv().await {
         let mut items = Vec::with_capacity(config.max_batch.max(1));
@@ -170,11 +220,14 @@ async fn run_batcher(
         }
 
         let metrics = metrics.clone();
-        let _ = tokio::task::spawn_blocking(move || process_batch(items, &metrics)).await;
+        let telemetry = telemetry.clone();
+        let _ =
+            tokio::task::spawn_blocking(move || process_batch(items, &metrics, telemetry.as_ref()))
+                .await;
     }
 }
 
-fn process_batch(items: Vec<BatchItem>, metrics: &Metrics) {
+fn process_batch(items: Vec<BatchItem>, metrics: &Metrics, telemetry: &dyn Telemetry) {
     let batch_size = items.len();
     let started = Instant::now();
     tracing::debug!(batch = batch_size, "batch start");
@@ -199,6 +252,10 @@ fn process_batch(items: Vec<BatchItem>, metrics: &Metrics) {
     }
     let elapsed = started.elapsed();
     metrics.record_batch(batch_size, elapsed);
+    telemetry.on_batch(&BatchEvent {
+        items: batch_size,
+        elapsed,
+    });
     tracing::debug!(
         batch = batch_size,
         elapsed_ms = elapsed.as_secs_f64() * 1000.0,
@@ -220,36 +277,81 @@ pub async fn serve_with_resolver(
     config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
 ) -> std::io::Result<()> {
-    serve_with_extensions(addr, registry, config, resolver, None).await
+    serve_with_extensions(
+        addr,
+        registry,
+        config,
+        ServerExtensions {
+            resolver,
+            ..ServerExtensions::default()
+        },
+    )
+    .await
 }
 
 pub async fn serve_with_extensions(
     addr: SocketAddr,
     registry: Arc<ModelRegistry>,
     config: ServerConfig,
-    resolver: Option<Arc<dyn ModelResolver>>,
-    cache: Option<Arc<dyn CacheManager>>,
+    extensions: ServerExtensions,
 ) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "sys1 server listening");
     axum::serve(
         listener,
-        router_with_extensions(registry, config, resolver, cache),
+        router_with_extensions(registry, config, extensions),
     )
     .await
 }
 
 async fn systemone(State(state): State<AppState>, request: Request) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let trace = request
+        .extensions()
+        .get::<TraceContext>()
+        .cloned()
+        .unwrap_or_else(TraceContext::generate);
+    let request_id = trace.request_id.clone();
+    let span = tracing::info_span!(
+        "systemone",
+        request_id = %trace.request_id,
+        trace_id = %trace.trace_id,
+        model = tracing::field::Empty,
+        status = tracing::field::Empty
+    );
     let started = Instant::now();
     let metrics = state.metrics.clone();
-    match handle_systemone(state, request).await {
+    let telemetry = state.telemetry.clone();
+    match handle_systemone(state, request, trace.clone())
+        .instrument(span.clone())
+        .await
+    {
         Ok(response) => {
-            metrics.record_systemone(started.elapsed(), true, Some(&response.model));
+            let elapsed = started.elapsed();
+            span.record("model", response.model.as_str());
+            span.record("status", u64::from(StatusCode::OK.as_u16()));
+            metrics.record_systemone(elapsed, true, Some(&response.model));
+            telemetry.on_request(&RequestEvent {
+                request_id: trace.request_id.clone(),
+                trace_id: trace.trace_id.clone(),
+                model: Some(response.model.clone()),
+                status: StatusCode::OK.as_u16(),
+                elapsed,
+                error: None,
+            });
             json_response(StatusCode::OK, response, &request_id)
         }
         Err(error) => {
-            metrics.record_systemone(started.elapsed(), false, None);
+            let elapsed = started.elapsed();
+            span.record("status", u64::from(error.status.as_u16()));
+            metrics.record_systemone(elapsed, false, None);
+            telemetry.on_request(&RequestEvent {
+                request_id: trace.request_id.clone(),
+                trace_id: trace.trace_id.clone(),
+                model: None,
+                status: error.status.as_u16(),
+                elapsed,
+                error: Some(error_message(&error)),
+            });
             json_response(error.status, error.body, &request_id)
         }
     }
@@ -258,6 +360,7 @@ async fn systemone(State(state): State<AppState>, request: Request) -> Response 
 async fn handle_systemone(
     state: AppState,
     request: Request,
+    trace: TraceContext,
 ) -> Result<SystemOneResponse, ApiError> {
     let (headers, body) = read_body(request, state.config.max_body_bytes).await?;
     check_auth(&state.config, &headers)?;
@@ -280,6 +383,8 @@ async fn handle_systemone(
             let requested = model.clone();
             let registry_for_acquire = registry.clone();
             let metrics = state.metrics.clone();
+            let telemetry = state.telemetry.clone();
+            let event_trace = trace.clone();
             tokio::task::spawn_blocking(move || {
                 let (canonical, _) = registry_for_acquire.resolve(&requested).ok_or_else(|| {
                     RegistryError::ModelNotFound {
@@ -288,7 +393,17 @@ async fn handle_systemone(
                 })?;
                 let started = Instant::now();
                 let acquired = registry_for_acquire.acquire(&canonical);
-                metrics.record_model_load(started.elapsed(), acquired.is_ok());
+                let elapsed = started.elapsed();
+                metrics.record_model_load(elapsed, acquired.is_ok());
+                telemetry.on_model(&ModelEvent {
+                    request_id: event_trace.request_id.clone(),
+                    trace_id: event_trace.trace_id.clone(),
+                    model: canonical.clone(),
+                    action: ModelAction::Load,
+                    success: acquired.is_ok(),
+                    elapsed,
+                    error: acquired.as_ref().err().map(ToString::to_string),
+                });
                 let model_handle = acquired?;
                 Ok::<_, RegistryError>((canonical, model_handle))
             })
@@ -346,6 +461,8 @@ async fn handle_systemone(
     }
 
     let metrics = state.metrics.clone();
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
     tokio::task::spawn_blocking(move || {
         if let Some((canonical, model_handle)) = registry.try_acquire(&model) {
             let output = model_handle
@@ -369,7 +486,17 @@ async fn handle_systemone(
                 })?;
         let started = Instant::now();
         let acquired = registry.acquire(&canonical);
-        metrics.record_model_load(started.elapsed(), acquired.is_ok());
+        let elapsed = started.elapsed();
+        metrics.record_model_load(elapsed, acquired.is_ok());
+        telemetry.on_model(&ModelEvent {
+            request_id: event_trace.request_id.clone(),
+            trace_id: event_trace.trace_id.clone(),
+            model: canonical.clone(),
+            action: ModelAction::Load,
+            success: acquired.is_ok(),
+            elapsed,
+            error: acquired.as_ref().err().map(ToString::to_string),
+        });
         let model_handle = acquired?;
         let output = model_handle
             .predict(&wire_state, &questions)
@@ -543,8 +670,9 @@ async fn admin_load(
     State(state): State<AppState>,
     Path(name): Path<String>,
     headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
 ) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, &headers) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -555,11 +683,23 @@ async fn admin_load(
 
     let registry = state.registry.clone();
     let metrics = state.metrics.clone();
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
     let load_name = canonical.clone();
     match tokio::task::spawn_blocking(move || {
         let started = Instant::now();
         let acquired = registry.acquire(&load_name);
-        metrics.record_model_load(started.elapsed(), acquired.is_ok());
+        let elapsed = started.elapsed();
+        metrics.record_model_load(elapsed, acquired.is_ok());
+        telemetry.on_model(&ModelEvent {
+            request_id: event_trace.request_id.clone(),
+            trace_id: event_trace.trace_id.clone(),
+            model: load_name,
+            action: ModelAction::Load,
+            success: acquired.is_ok(),
+            elapsed,
+            error: acquired.as_ref().err().map(ToString::to_string),
+        });
         acquired
     })
     .await
@@ -589,8 +729,9 @@ async fn admin_unload(
     State(state): State<AppState>,
     Path(name): Path<String>,
     headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
 ) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, &headers) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -601,12 +742,29 @@ async fn admin_unload(
 
     let registry = state.registry.clone();
     let metrics = state.metrics.clone();
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
     let unload_name = canonical.clone();
     match tokio::task::spawn_blocking(move || {
+        let started = Instant::now();
         let was_loaded = registry.unload(&unload_name);
+        let elapsed = started.elapsed();
         if was_loaded {
             metrics.record_model_unload();
         }
+        telemetry.on_model(&ModelEvent {
+            request_id: event_trace.request_id.clone(),
+            trace_id: event_trace.trace_id.clone(),
+            model: unload_name,
+            action: ModelAction::Unload,
+            success: was_loaded,
+            elapsed,
+            error: if was_loaded {
+                None
+            } else {
+                Some("model was not resident".to_owned())
+            },
+        });
         was_loaded
     })
     .await
@@ -632,8 +790,9 @@ async fn admin_reload(
     State(state): State<AppState>,
     Path(name): Path<String>,
     headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
 ) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, &headers) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -644,15 +803,27 @@ async fn admin_reload(
 
     let registry = state.registry.clone();
     let metrics = state.metrics.clone();
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
     let reload_name = canonical.clone();
     let result = tokio::task::spawn_blocking(move || {
+        let started = Instant::now();
         let was_loaded = registry.unload(&reload_name);
         if was_loaded {
             metrics.record_model_unload();
         }
-        let started = Instant::now();
         let acquired = registry.acquire(&reload_name);
-        metrics.record_model_load(started.elapsed(), acquired.is_ok());
+        let elapsed = started.elapsed();
+        metrics.record_model_load(elapsed, acquired.is_ok());
+        telemetry.on_model(&ModelEvent {
+            request_id: event_trace.request_id.clone(),
+            trace_id: event_trace.trace_id.clone(),
+            model: reload_name,
+            action: ModelAction::Reload,
+            success: acquired.is_ok(),
+            elapsed,
+            error: acquired.as_ref().err().map(ToString::to_string),
+        });
         (was_loaded, acquired)
     })
     .await;
@@ -692,8 +863,12 @@ struct CacheRemoveResult {
     removed: bool,
 }
 
-async fn admin_cache(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+async fn admin_cache(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
+) -> Response {
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, &headers) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -701,8 +876,24 @@ async fn admin_cache(State(state): State<AppState>, headers: HeaderMap) -> Respo
         let error = ApiError::not_implemented("disk cache management is not configured");
         return json_response(error.status, error.body, &request_id);
     };
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
 
-    match tokio::task::spawn_blocking(move || (cache.root(), cache.list())).await {
+    match tokio::task::spawn_blocking(move || {
+        let cache_dir = cache.root();
+        let result = cache.list();
+        telemetry.on_cache(&CacheEvent {
+            request_id: event_trace.request_id.clone(),
+            trace_id: event_trace.trace_id.clone(),
+            key: None,
+            action: CacheAction::List,
+            success: result.is_ok(),
+            error: result.as_ref().err().cloned(),
+        });
+        (cache_dir, result)
+    })
+    .await
+    {
         Ok((cache_dir, Ok(models))) => {
             json_response(StatusCode::OK, CacheList { cache_dir, models }, &request_id)
         }
@@ -723,8 +914,9 @@ async fn admin_cache_remove(
     State(state): State<AppState>,
     Path(key): Path<String>,
     headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
 ) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, &headers) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -743,15 +935,66 @@ async fn admin_cache_remove(
     let admin_lock = state.admin_lock.clone();
     let _admin_guard = admin_lock.lock().await;
     let registry = state.registry.clone();
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
     let remove_key = key.clone();
+    let event_key = key.clone();
     let result = tokio::task::spawn_blocking(move || {
-        let models = cache.list()?;
+        let models = match cache.list() {
+            Ok(models) => models,
+            Err(error) => {
+                telemetry.on_cache(&CacheEvent {
+                    request_id: event_trace.request_id.clone(),
+                    trace_id: event_trace.trace_id.clone(),
+                    key: Some(event_key.clone()),
+                    action: CacheAction::Remove,
+                    success: false,
+                    error: Some(error.clone()),
+                });
+                return Err(error);
+            }
+        };
         if let Some(entry) = models.iter().find(|entry| entry.key == remove_key)
             && registry.is_loaded(&entry.name)
         {
+            let message = format!(
+                "model `{}` is loaded; unload it before removing the cache",
+                entry.name
+            );
+            telemetry.on_cache(&CacheEvent {
+                request_id: event_trace.request_id.clone(),
+                trace_id: event_trace.trace_id.clone(),
+                key: Some(event_key),
+                action: CacheAction::Remove,
+                success: false,
+                error: Some(message),
+            });
             return Ok::<_, String>((false, Some(entry.name.clone())));
         }
-        cache.remove(&remove_key).map(|removed| (removed, None))
+        match cache.remove(&remove_key) {
+            Ok(removed) => {
+                telemetry.on_cache(&CacheEvent {
+                    request_id: event_trace.request_id.clone(),
+                    trace_id: event_trace.trace_id.clone(),
+                    key: Some(event_key),
+                    action: CacheAction::Remove,
+                    success: true,
+                    error: None,
+                });
+                Ok((removed, None))
+            }
+            Err(error) => {
+                telemetry.on_cache(&CacheEvent {
+                    request_id: event_trace.request_id.clone(),
+                    trace_id: event_trace.trace_id.clone(),
+                    key: Some(event_key),
+                    action: CacheAction::Remove,
+                    success: false,
+                    error: Some(error.clone()),
+                });
+                Err(error)
+            }
+        }
     })
     .await;
 
@@ -790,7 +1033,12 @@ fn valid_cache_key(key: &str) -> bool {
 }
 
 async fn admin_add_model(State(state): State<AppState>, request: Request) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let trace = request
+        .extensions()
+        .get::<TraceContext>()
+        .cloned()
+        .unwrap_or_else(TraceContext::generate);
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, request.headers()) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -867,20 +1115,42 @@ async fn admin_add_model(State(state): State<AppState>, request: Request) -> Res
         .into_iter()
         .map(|manifest| manifest.name)
         .collect();
+    let registration_started = Instant::now();
     let mut added: Vec<String> = Vec::with_capacity(manifests.len());
     for manifest in manifests {
         let name = manifest.name.clone();
         if let Err(error) = state.registry.register(manifest) {
+            let error = map_manifest_error(error);
+            state.telemetry.on_model(&ModelEvent {
+                request_id: trace.request_id.clone(),
+                trace_id: trace.trace_id.clone(),
+                model: name,
+                action: ModelAction::Register,
+                success: false,
+                elapsed: registration_started.elapsed(),
+                error: Some(error_message(&error)),
+            });
             for resolved_name in &resolved {
                 if !pre_existing.contains(resolved_name) {
                     state.registry.unregister(resolved_name);
                     let _ = resolver.release(resolved_name);
                 }
             }
-            let error = map_manifest_error(error);
             return json_response(error.status, error.body, &request_id);
         }
         added.push(name);
+    }
+    let registration_elapsed = registration_started.elapsed();
+    for name in &added {
+        state.telemetry.on_model(&ModelEvent {
+            request_id: trace.request_id.clone(),
+            trace_id: trace.trace_id.clone(),
+            model: name.clone(),
+            action: ModelAction::Register,
+            success: true,
+            elapsed: registration_elapsed,
+            error: None,
+        });
     }
 
     let loaded = if payload.load {
@@ -892,11 +1162,23 @@ async fn admin_add_model(State(state): State<AppState>, request: Request) -> Res
             .expect("a successful registration added at least one model");
         let registry = state.registry.clone();
         let metrics = state.metrics.clone();
+        let telemetry = state.telemetry.clone();
+        let event_trace = trace.clone();
         let load_name = primary.clone();
         let result = tokio::task::spawn_blocking(move || {
             let started = Instant::now();
             let acquired = registry.acquire(&load_name);
-            metrics.record_model_load(started.elapsed(), acquired.is_ok());
+            let elapsed = started.elapsed();
+            metrics.record_model_load(elapsed, acquired.is_ok());
+            telemetry.on_model(&ModelEvent {
+                request_id: event_trace.request_id.clone(),
+                trace_id: event_trace.trace_id.clone(),
+                model: load_name,
+                action: ModelAction::Load,
+                success: acquired.is_ok(),
+                elapsed,
+                error: acquired.as_ref().err().map(ToString::to_string),
+            });
             acquired
         })
         .await;
@@ -947,8 +1229,9 @@ async fn admin_remove(
     State(state): State<AppState>,
     Path(name): Path<String>,
     headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
 ) -> Response {
-    let request_id = Uuid::new_v4().to_string();
+    let request_id = trace.request_id.clone();
     if let Err(error) = check_auth(&state.config, &headers) {
         return json_response(error.status, error.body, &request_id);
     }
@@ -962,8 +1245,11 @@ async fn admin_remove(
     let registry = state.registry.clone();
     let resolver = state.resolver.clone();
     let metrics = state.metrics.clone();
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
     let remove_name = canonical.clone();
     match tokio::task::spawn_blocking(move || {
+        let started = Instant::now();
         let was_loaded = registry.is_loaded(&remove_name);
         let removed = registry.unregister(&remove_name);
         if removed && was_loaded {
@@ -972,6 +1258,15 @@ async fn admin_remove(
         if let Some(resolver) = resolver {
             let _ = resolver.release(&remove_name);
         }
+        telemetry.on_model(&ModelEvent {
+            request_id: event_trace.request_id.clone(),
+            trace_id: event_trace.trace_id.clone(),
+            model: remove_name,
+            action: ModelAction::Remove,
+            success: removed,
+            elapsed: started.elapsed(),
+            error: (!removed).then(|| "model was not in the catalog".to_owned()),
+        });
         removed
     })
     .await
@@ -994,6 +1289,10 @@ async fn admin_remove(
 
 fn unknown_model(name: &str) -> ApiError {
     ApiError::not_found(format!("unknown model: {name}"))
+}
+
+fn error_message(error: &ApiError) -> String {
+    serde_json::to_string(&error.body).unwrap_or_else(|_| "request failed".to_owned())
 }
 
 /// Resolution failures are client-visible (bad reference, missing checkpoint,

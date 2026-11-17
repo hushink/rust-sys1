@@ -1,5 +1,6 @@
 mod cache;
 mod config;
+mod logging;
 mod source;
 
 use anyhow::{Context, bail};
@@ -27,8 +28,9 @@ use sys1_laya::{
     is_checkpoint_directory, local_checkpoint_manifest, register_checkpoint_bundle, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
-use sys1_server::{BatchConfig, ServerConfig, serve_with_extensions};
-use tracing_subscriber::EnvFilter;
+use sys1_server::{
+    BatchConfig, ServerConfig, ServerExtensions, TracingTelemetry, serve_with_extensions,
+};
 
 #[derive(Parser)]
 #[command(
@@ -44,6 +46,15 @@ struct Cli {
     config: Option<PathBuf>,
     #[arg(long, global = true)]
     offline: bool,
+    /// `tracing` filter, e.g. `info` or `sys1=debug,tower_http=info`.
+    #[arg(long, global = true, env = "SYS1_LOG_LEVEL", value_name = "FILTER")]
+    log_level: Option<String>,
+    /// Log format: text or json.
+    #[arg(long, global = true, env = "SYS1_LOG_FORMAT", value_name = "FORMAT")]
+    log_format: Option<String>,
+    /// Append logs to a file instead of stdout.
+    #[arg(long, global = true, env = "SYS1_LOG_FILE", value_name = "FILE")]
+    log_file: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -171,16 +182,17 @@ struct DoctorArgs {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
-
     let cli = Cli::parse();
     let cache = cli.cache.clone();
     let offline = cli.offline;
     let config = config::load(cli.config.as_deref())?;
+    logging::init(
+        cli.log_level.clone(),
+        cli.log_format.clone(),
+        cli.log_file.clone(),
+        &config.value.server,
+    )?;
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), "sys1 starting");
     match cli.command {
         Command::Serve(args) => serve_command(cache.as_deref(), offline, &config, args),
         Command::Pull(args) => {
@@ -351,8 +363,11 @@ fn serve_command(
         bind,
         registry,
         server_config,
-        Some(resolver),
-        Some(cache_manager),
+        ServerExtensions {
+            resolver: Some(resolver),
+            cache: Some(cache_manager),
+            telemetry: Some(Arc::new(TracingTelemetry)),
+        },
     ))?;
     Ok(())
 }

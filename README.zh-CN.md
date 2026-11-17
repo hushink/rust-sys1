@@ -18,6 +18,7 @@
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁。
 - 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理。
 - 运行时模型管理：无需重启即可加载、卸载、重载、添加和移除模型。
+- 可观测性：Prometheus/JSON 指标、可替换 telemetry、W3C `traceparent`、text/JSON/文件日志。
 - 加速器 feature 骨架：CPU / CUDA / cuDNN / Metal / Accelerate。
 
 ## Workspace
@@ -84,6 +85,8 @@ token 默认启用精确 local-window attention；`--no-local-window` 退回 eag
 
 用 `--preload laya-latest`（可重复）或 `[server] preload` 在监听端口前加载模型。
 `/metrics`（Prometheus）与 `/api/metrics`（JSON）默认开启，`--no-metrics` 关闭。
+日志默认 text 输出到 stdout；可用 `--log-format json`、`--log-file`、
+`--log-level` 调整。
 
 ### 运行时模型管理
 
@@ -147,6 +150,26 @@ metrics = true
 预加载避免首个请求承担冷加载成本（CPU Laya 约数秒）；模型不存在或加载失败会
 带模型名终止启动。
 
+### 日志与追踪
+
+CLI 负责安装 `tracing` subscriber；各库不安装全局 logger，因此可组合任意日志栈。
+CLI 参数：
+
+```bash
+sys1 serve --log-level "sys1=debug,tower_http=info" \
+  --log-format json --log-file logs/sys1.log
+```
+
+对应的 `[server]` 配置键：`log_level`、`log_format`（`text`/`json`）、
+`log_file`（相对配置文件）。优先级：CLI / `SYS1_LOG_*` > `RUST_LOG`（过滤器）
+> 配置 > 默认。JSON 记录包含 `request_id` 与 `trace_id`。
+
+嵌入时 `sys1-server` 通过 `ServerExtensions` 暴露可替换的 `Telemetry` sink
+（`RequestEvent`、`ModelEvent`、`BatchEvent`、`CacheEvent`）。默认空实现；
+`TracingTelemetry` 输出结构化事件。`/v1/systemone` 接受并返回 W3C
+`traceparent`（保留入站 trace id，返回新的 server span id），并与原有
+`x-typesafe-request-id` 并存。
+
 ### 配置
 
 部署相关配置都可以放到 `sys1.toml`，代码里只保留内置默认值。优先级：
@@ -170,6 +193,9 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 # local_window = true
 # metrics = true
 # preload = ["laya-latest"]
+# log_level = "info"
+# log_format = "text"          # text | json
+# log_file = "logs/sys1.log"   # 追加到文件而非 stdout
 
 [models]
 laya-latest = "local:D:/models/laya"       # 本地模型目录

@@ -64,14 +64,17 @@ let app = router_with_resolver(
 
 ```rust
 use std::sync::Arc;
-use sys1_server::{CacheManager, router_with_extensions};
+use sys1_server::{ServerExtensions, TracingTelemetry, router_with_extensions};
 
-let cache: Arc<dyn CacheManager> = Arc::new(my_cache);
+let extensions = ServerExtensions {
+    resolver: Some(resolver),
+    cache: Some(Arc::new(my_cache)),
+    telemetry: Some(Arc::new(TracingTelemetry)),
+};
 let app = router_with_extensions(
     registry,
     ServerConfig { enable_admin: true, ..ServerConfig::default() },
-    Some(resolver),
-    Some(cache),
+    extensions,
 );
 ```
 
@@ -121,6 +124,42 @@ let app = router_with_extensions(
 Prometheus 中除以对应的请求/batch/加载计数即可得到均值。计数器从 HTTP 服务启动时
 开始；由 `sys1 serve --preload` 加载的模型会出现在 `loaded`/`loaded_count` 中，
 但不会计入 `sys1_model_loads_total`。
+
+## Telemetry 与 trace context
+
+`sys1-server` 从不安装 `tracing` subscriber。它只发 `tracing` span/事件，并可选地
+调用可替换的结构化 sink：
+
+- 嵌入方可安装任意 `tracing` subscriber，或通过
+  `ServerExtensions { telemetry: Some(Arc::new(my_sink)) }` 传给
+  `router_with_extensions` / `serve_with_extensions`。
+- 事件：`RequestEvent`、`ModelEvent`、`BatchEvent`、`CacheEvent`，相关事件携带
+  `request_id`/`trace_id`。
+- 库默认 `NoopTelemetry`；`TracingTelemetry` 在 `sys1.telemetry` target 输出结构化
+  事件，CLI 使用它。
+- `sys1 serve` 支持 text/JSON 日志、追加文件与过滤器，通过 `--log-*` /
+  `SYS1_LOG_*` / `[server] log_*` 配置。
+
+自定义 sink 只需实现关心的方法：
+
+```rust
+use sys1_server::{ModelEvent, Telemetry};
+
+struct Audit;
+impl Telemetry for Audit {
+    fn on_model(&self, event: &ModelEvent) {
+        eprintln!(
+            "{} {} success={} by {}",
+            event.action, event.model, event.success, event.request_id
+        );
+    }
+}
+```
+
+每个 HTTP 响应都会带 W3C `traceparent`。合法入站 `traceparent` 的 128-bit
+trace id 会保留；服务端生成新的 64-bit span id，并保留 sampled 标志。没有
+`traceparent` 的请求会生成新 trace id。原有 `x-typesafe-request-id` 保留，两个 id
+都会出现在请求/模型/缓存 telemetry 事件与 `systemone` tracing span 中。
 
 ## 行为
 

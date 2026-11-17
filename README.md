@@ -18,6 +18,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock.
 - Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference.
 - Runtime model management: load, unload, reload, and add/remove models without restarting.
+- Observability: Prometheus/JSON metrics, replaceable telemetry, W3C `traceparent`, text/JSON/file logs.
 - Accelerator feature skeleton: CPU / CUDA / cuDNN / Metal / Accelerate.
 
 ## Workspace
@@ -86,7 +87,9 @@ states of at least 512 tokens; use `--no-local-window` for the eager baseline.
 
 Use `--preload laya-latest` (repeatable) or `[server] preload` to load models
 before the listener starts. `/metrics` (Prometheus) and `/api/metrics` (JSON)
-are enabled by default; `--no-metrics` disables them.
+are enabled by default; `--no-metrics` disables them. Logs default to text on
+stdout; use `--log-format json`, `--log-file`, and `--log-level` to change the
+sink.
 
 ### Runtime model management
 
@@ -155,6 +158,28 @@ Preloading avoids paying the cold-load cost (several seconds for CPU Laya) on
 the first request; an unknown or failing preload aborts startup with the model
 name.
 
+### Logging and tracing
+
+The CLI owns the `tracing` subscriber; the libraries never install one, so they
+compose with any logging stack. CLI options:
+
+```bash
+sys1 serve --log-level "sys1=debug,tower_http=info" \
+  --log-format json --log-file logs/sys1.log
+```
+
+Equivalent `[server]` keys: `log_level`, `log_format` (`text`/`json`), and
+`log_file` (relative to the config file). Precedence is CLI / `SYS1_LOG_*` >
+`RUST_LOG` (filter) > config > defaults. JSON records include `request_id` and
+`trace_id`.
+
+For embedding, `sys1-server` exposes a replaceable `Telemetry` sink
+(`RequestEvent`, `ModelEvent`, `BatchEvent`, `CacheEvent`) through
+`ServerExtensions`. The default is a no-op; `TracingTelemetry` emits structured
+events. `/v1/systemone` accepts and returns W3C `traceparent` (the incoming
+trace id is preserved, a fresh server span id is returned) alongside the
+existing `x-typesafe-request-id`.
+
 ### Configuration
 
 All deployment-specific values can live in `sys1.toml`; code contains only
@@ -178,6 +203,9 @@ cache_dir = "D:/models/sys1-cache"  # model download/cache directory
 # local_window = true
 # metrics = true
 # preload = ["laya-latest"]
+# log_level = "info"
+# log_format = "text"          # text | json
+# log_file = "logs/sys1.log"   # append instead of stdout
 
 [models]
 laya-latest = "local:D:/models/laya"       # local model directory
