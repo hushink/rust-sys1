@@ -400,8 +400,9 @@ pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
 cargo test --offline --workspace
 ```
 
-Laya golden tests are ignored by default because they need local checkpoints and
-the official golden vectors:
+Hub tests spin up a loopback HTTP model center and cover manifest resolution,
+Bearer tokens, and Range-resumed downloads. Laya golden tests are ignored by
+default because they need local checkpoints and the official golden vectors:
 
 ```bash
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
@@ -414,7 +415,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 
 ## Known gaps / roadmap
 
-- zstd request compression; `sys1.toml` config precedence.
+- zstd request compression.
 - ONNX Runtime / TensorRT Execution Provider (v1.1). TensorRT is not achievable
   through candle; ORT TensorRT EP is the planned path.
 - Long-context scanning, act head, abstention, parallel option layout (v1.1).

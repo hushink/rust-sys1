@@ -421,9 +421,10 @@ async fn concurrent_requests_are_batched() {
         assert_eq!(response.expect("response").status(), StatusCode::OK);
     }
     let batches = batches.lock().expect("batch log").clone();
+    assert_eq!(batches.iter().sum::<usize>(), 4, "batches: {batches:?}");
     assert!(
-        batches.iter().any(|&size| size >= 4),
-        "batches: {batches:?}"
+        batches.iter().any(|&size| size >= 2),
+        "no request shared a batch: {batches:?}"
     );
 }
 

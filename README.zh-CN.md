@@ -376,7 +376,8 @@ pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
 cargo test --offline --workspace
 ```
 
-Laya 官方 golden 测试默认忽略，需要本地权重与官方 golden vectors：
+Hub 测试会启动本地回环 HTTP 模型中心，覆盖 manifest 解析、Bearer token 和
+Range 断点续传。Laya 官方 golden 测试默认忽略，需要本地权重与官方 golden vectors：
 
 ```powershell
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
@@ -389,7 +390,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 
 ## 已知缺口 / Roadmap
 
-- zstd 请求压缩、`sys1.toml` 配置优先级。
+- zstd 请求压缩。
 - ONNX Runtime / TensorRT Execution Provider（v1.1）。candle 无法直接承载 TensorRT；
   ORT TensorRT EP 是计划路径。
 - long context 扫描、act head、abstention、parallel option layout（v1.1）。

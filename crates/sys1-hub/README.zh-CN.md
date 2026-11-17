@@ -67,3 +67,6 @@ manifest，不下载文件。
 ```bash
 cargo test --offline -p sys1-hub
 ```
+
+集成测试会启动本地回环 HTTP 模型中心，覆盖相对文件 URL、Bearer token 认证与
+Range 断点续传的 `.partial` 下载。

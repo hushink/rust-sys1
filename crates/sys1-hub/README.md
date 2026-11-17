@@ -67,3 +67,6 @@ Custom centers implement `ModelSource` and are passed to `Hub::with_sources`.
 ```bash
 cargo test --offline -p sys1-hub
 ```
+
+Integration tests start a loopback HTTP model center and cover relative file
+URLs, Bearer token auth, and Range-resumed `.partial` downloads.

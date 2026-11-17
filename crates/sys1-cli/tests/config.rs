@@ -1,5 +1,8 @@
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::process::Command;
+use std::thread;
 
 fn sys1() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sys1"));
@@ -69,6 +72,68 @@ fn serve_without_models_requires_the_admin_api() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no models configured"), "{stderr}");
+}
+
+fn serve_manifest_once(manifest: String) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind manifest server");
+    let address = listener.local_addr().expect("local address");
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept manifest request");
+        let mut request = [0_u8; 4096];
+        let _ = stream.read(&mut request);
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n",
+            manifest.len()
+        )
+        .expect("response head");
+        stream
+            .write_all(manifest.as_bytes())
+            .expect("response body");
+    });
+    (format!("http://{address}/model.json"), handle)
+}
+
+#[test]
+fn config_name_resolves_a_custom_http_center() {
+    let manifest = serde_json::json!({
+        "schema_version": 1,
+        "name": "custom-http",
+        "description": "custom center",
+        "release_date": "2026-01-01",
+        "family": "test",
+        "backend": "fake",
+        "format": "test",
+        "version": "1.0.0",
+        "files": [{
+            "path": "weights.bin",
+            "url": "weights.bin",
+            "size": 4
+        }]
+    })
+    .to_string();
+    let (url, server) = serve_manifest_once(manifest);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("sys1.toml");
+    fs::write(
+        &config,
+        format!("[hub]\ncache_dir = \"cache\"\n\n[models]\ncustom = \"{url}\"\n"),
+    )
+    .expect("config");
+
+    let output = sys1()
+        .args(["--config", config.to_str().unwrap(), "show", "custom"])
+        .output()
+        .expect("run sys1 show");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"name\": \"custom-http\""), "{stdout}");
+    server.join().expect("manifest server");
 }
 
 #[test]
