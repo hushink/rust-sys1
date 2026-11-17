@@ -55,6 +55,9 @@ Useful flags:
 --max-attention-elements 67108864  # chunk long batches by attention memory
 --no-batch                 # disable cross-request batching
 --no-admin                 # disable /api/models management endpoints
+--metrics                  # force /metrics and /api/metrics on
+--no-metrics               # disable /metrics and /api/metrics
+--preload <name>           # load before serving; repeatable
 --offline
 --cache <dir>              # or SYS1_CACHE
 ```
@@ -88,6 +91,17 @@ available to `/v1/systemone` immediately. Runtime additions and removals are not
 persisted; `[models]` in `sys1.toml` is authoritative after a restart.
 In-flight requests holding a model handle finish normally.
 
+`--preload NAME` (or `[server] preload`) loads selected models before the
+listener starts, so the first request does not pay the cold-load cost. A
+preload failure aborts startup with the model name.
+
+`/metrics` (Prometheus) and `/api/metrics` (JSON) are enabled by default in the
+CLI; `--no-metrics` disables them, `--metrics` forces them on. They use the same
+Bearer key as `/v1/*` when configured. The JSON includes request/error/latency
+counters, batch size/latency, model load/unload counts, per-model request counts,
+and currently resident models. Preloaded models are already resident when the
+HTTP metrics start, so they do not increment `model load` counters.
+
 ## Configuration
 
 `--config <file>` or `SYS1_CONFIG` loads a TOML file; `./sys1.toml` is used
@@ -103,6 +117,8 @@ device = "cuda:0"
 dtype = "f16"
 batch_max = 32
 max_attention_elements = 67108864
+metrics = true
+preload = ["laya-latest"]
 
 [models]
 laya-latest = "local:D:/models/laya"

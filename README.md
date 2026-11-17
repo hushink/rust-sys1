@@ -84,6 +84,10 @@ Cross-request batching is enabled by default (`--batch-max 32
 lower-risk F32 speedup. Exact local-window attention is on by default for CUDA
 states of at least 512 tokens; use `--no-local-window` for the eager baseline.
 
+Use `--preload laya-latest` (repeatable) or `[server] preload` to load models
+before the listener starts. `/metrics` (Prometheus) and `/api/metrics` (JSON)
+are enabled by default; `--no-metrics` disables them.
+
 ### Runtime model management
 
 The CLI exposes an operational API outside `/v1`. It is enabled by default and
@@ -115,6 +119,31 @@ configured `[models]` catalog is authoritative after a restart. In-flight
 requests that already hold a model handle finish normally; later requests
 trigger a lazy load again.
 
+### Metrics and preload
+
+```bash
+# Prometheus scrape
+curl -s http://127.0.0.1:8080/metrics | head
+
+# JSON snapshot: request/error/latency, batch size/time, model load/unload,
+# per-model request counts, and resident models
+curl http://127.0.0.1:8080/api/metrics
+```
+
+Both endpoints use the same Bearer key as `/v1/*` when configured. CLI defaults:
+metrics on, admin on. Library defaults: `ServerConfig::enable_metrics = false`,
+`enable_admin = false`.
+
+```toml
+[server]
+preload = ["laya-latest"]  # load before accepting requests
+metrics = true
+```
+
+Preloading avoids paying the cold-load cost (several seconds for CPU Laya) on
+the first request; an unknown or failing preload aborts startup with the model
+name.
+
 ### Configuration
 
 All deployment-specific values can live in `sys1.toml`; code contains only
@@ -136,6 +165,8 @@ cache_dir = "D:/models/sys1-cache"  # model download/cache directory
 # batch_wait_ms = 2
 # max_attention_elements = 67108864
 # local_window = true
+# metrics = true
+# preload = ["laya-latest"]
 
 [models]
 laya-latest = "local:D:/models/laya"       # local model directory

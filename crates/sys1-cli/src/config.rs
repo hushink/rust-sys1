@@ -55,6 +55,11 @@ pub struct ServerSection {
     pub local_window: Option<bool>,
     /// `false` disables the `/api/models` management endpoints (default true).
     pub admin: Option<bool>,
+    /// `false` disables `/metrics` and `/api/metrics` (default true for the CLI).
+    pub metrics: Option<bool>,
+    /// Models to load before serving. Names may be aliases from `[models]`.
+    #[serde(default)]
+    pub preload: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -192,12 +197,16 @@ mod tests {
             batch_max = 64
             batch_wait_ms = 1
             local_window = true
+            metrics = false
+            preload = ["laya-latest"]
 
             [models]
             laya-latest = "local:D:/models/laya"
         "#;
         let config: FileConfig = toml::from_str(text).expect("config");
         assert_eq!(config.server.batch_max, Some(64));
+        assert_eq!(config.server.metrics, Some(false));
+        assert_eq!(config.server.preload, vec!["laya-latest".to_owned()]);
         assert_eq!(
             config.models.get("laya-latest").map(String::as_str),
             Some("local:D:/models/laya")

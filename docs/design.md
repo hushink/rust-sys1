@@ -100,6 +100,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 未知模型返回 400 `{detail: ...}`。
 - `/v1/*` 不输出 Laya 私有字段；扩展字段放到 `/api/*` 或响应头（后续）。
 - 运行时模型管理：`/api/models` 提供目录/常驻状态、`load`/`unload`/`reload`、按引用添加与删除；与 `/v1/*` 共用 Bearer，库内默认关闭（`ServerConfig::enable_admin`），`sys1 serve` 默认开启并可用 `--no-admin` 关闭。运行时增删不持久化，重启后以配置 manifest 为准。细节见 ADR 0008。
+- 可观测性：`/metrics`（Prometheus 文本）与 `/api/metrics`（JSON）记录 systemone 请求/错误/延迟、batch 大小与耗时、模型加载/卸载/失败、按模型请求数、常驻模型数与 uptime；`ServerConfig::enable_metrics` 库内默认关闭，CLI 默认开启。端点与 `/v1/*` 共用 Bearer。
+- 预加载：`[server] preload` / `--preload` 在监听端口前调用注册表 `acquire`，避免首请求冷加载；失败带模型名终止启动。
 - 超长 state 的 v1 行为待确认：建议返回 400，detail 含 `max_tokens_exceeded`（不做静默截断）。
 - 跨请求 batching：并发请求经 mpsc 聚合，按模型分组后调用 `predict_batch`；默认 `max_batch=32`、`max_wait=2 ms`，GPU 单请求只付 500 µs yield grace。模型可用 `supports_cross_request_batching` 退出；CPU 上的 Laya 退出，因为独立 CPU 前向已经使用线程池。进程内接口不自动批处理，调用方可直接使用 `predict_batch`。细节见 ADR 0006。
 - GPU 精度档位：默认 F32；`--dtype f16` 在 Ampere+ 上提高高并发吞吐，抽查概率差异 ~5e-4；`--tf32` 为 F32 GEMM 启用 TF32，收益在波动范围内。
@@ -176,6 +178,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 默认绑定 `127.0.0.1:8080`；缓存目录用平台默认，`SYS1_CACHE` 覆盖。
 - `--api-key` / `SYS1_API_KEY` 可选；日志用 `tracing` + `RUST_LOG`。
 - `/api/models` 管理 API 默认开启；`--no-admin` 或 `[server] admin = false` 关闭；未设置 API key 时启动日志告警。
+- `/metrics` 与 `/api/metrics` 默认开启；`--no-metrics` 或 `[server] metrics = false` 关闭；`--metrics` 可强制开启。
+- `[server] preload` / `--preload NAME` 在 serve 前加载模型，失败则启动失败。
 - 二进制名暂定 `sys1`。
 
 ## 9. 验收
@@ -201,6 +205,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 已用本地回环 HTTP 模型中心验证：manifest 解析、相对文件 URL、Bearer token、Range 断点续传，以及 `[models]` 名称映射。
 - 已用本地缓存权重验证 `InferenceEngine` 进程内链路：`from_directory` → `add` → `predict` → `unload`；示例输出 noul 0.9678、score 1.7664，ignored 集成测试 19.4 s 通过。
 - 命名边界已整理：非 `sys1-laya` crate 不再定义 `Laya*` 标识符；checkpoint 布局辅助移入 `sys1-laya`。
+- 已实现 `/metrics` 与 `/api/metrics`（systemone、batching、模型生命周期、按模型请求数）；`preload` 启动预加载在 `serve` 绑定端口前执行，未知模型即失败。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
 - 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。

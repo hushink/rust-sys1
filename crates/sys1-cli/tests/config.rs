@@ -1,8 +1,17 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::path::Path;
 use std::process::Command;
 use std::thread;
+
+fn checkpoint(directory: &Path) {
+    fs::create_dir_all(directory.join("encoder")).expect("encoder dir");
+    fs::write(directory.join("model.safetensors"), b"x").expect("weights");
+    fs::write(directory.join("encoder/config.json"), b"{}").expect("encoder config");
+    fs::write(directory.join("rl_agent_config.json"), b"{}").expect("rl config");
+    fs::write(directory.join("tokenizer/tokenizer.json"), b"{}").expect("tokenizer");
+}
 
 fn sys1() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_sys1"));
@@ -134,6 +143,35 @@ fn config_name_resolves_a_custom_http_center() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"name\": \"custom-http\""), "{stdout}");
     server.join().expect("manifest server");
+}
+
+#[test]
+fn serve_fails_when_a_preload_model_is_unknown() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let model_dir = dir.path().join("laya");
+    fs::create_dir_all(model_dir.join("tokenizer")).expect("model dir");
+    checkpoint(&model_dir);
+    let model_path = model_dir.display().to_string().replace('\\', "/");
+
+    let config = dir.path().join("sys1.toml");
+    fs::write(
+        &config,
+        format!(
+            "[hub]\ncache_dir = \"cache\"\n\n\
+             [server]\ndevice = \"cpu\"\ndtype = \"f32\"\nadmin = false\n\
+             preload = [\"missing\"]\n\n\
+             [models]\nlaya = \"local:{model_path}\"\n"
+        ),
+    )
+    .expect("config");
+
+    let output = sys1()
+        .args(["--config", config.to_str().unwrap(), "serve"])
+        .output()
+        .expect("run sys1 serve");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("preload model `missing`"), "{stderr}");
 }
 
 #[test]

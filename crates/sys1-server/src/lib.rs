@@ -5,6 +5,7 @@
 mod body;
 mod config;
 mod error;
+mod metrics;
 mod server;
 
 pub use config::{BatchConfig, ServerConfig};

@@ -13,7 +13,7 @@ use std::io::Read;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sys1_core::{
     DecisionModel, DevicePreference, ModelManifest, ModelRegistry, ModelResolver, Questions,
     RegistryConfig,
@@ -106,6 +106,15 @@ struct ServeArgs {
     /// Disable the `/api/models` management endpoints.
     #[arg(long)]
     no_admin: bool,
+    /// Enable `/metrics` and `/api/metrics` even if the config disables them.
+    #[arg(long, conflicts_with = "no_metrics")]
+    metrics: bool,
+    /// Disable `/metrics` and `/api/metrics`.
+    #[arg(long)]
+    no_metrics: bool,
+    /// Load these models before serving (repeatable). Overrides [server] preload.
+    #[arg(long = "preload", value_name = "NAME")]
+    preload: Vec<String>,
 }
 
 #[derive(clap::Args)]
@@ -260,6 +269,13 @@ fn serve_command(
         args.models
     };
     let enable_admin = !args.no_admin && server.admin.unwrap_or(true);
+    let enable_metrics = if args.metrics {
+        true
+    } else if args.no_metrics {
+        false
+    } else {
+        server.metrics.unwrap_or(true)
+    };
     let hub = make_hub(cache, offline, config)?;
     let (manifests, factory) = build_models(&hub, &specs, options.clone())?;
     if manifests.is_empty() {
@@ -285,6 +301,23 @@ fn serve_command(
         RegistryConfig::default(),
     )?);
 
+    let preload = if args.preload.is_empty() {
+        server.preload.clone()
+    } else {
+        args.preload.clone()
+    };
+    for name in &preload {
+        let started = Instant::now();
+        registry
+            .acquire(name)
+            .with_context(|| format!("preload model `{name}`"))?;
+        tracing::info!(
+            model = %name,
+            elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "preloaded model"
+        );
+    }
+
     let batch_max = args.batch_max.or(server.batch_max).unwrap_or(32);
     let batch_wait_ms = args.batch_wait_ms.or(server.batch_wait_ms).unwrap_or(2);
     let batching = if args.no_batch || server.batch == Some(false) {
@@ -296,15 +329,16 @@ fn serve_command(
         })
     };
     let api_key = args.api_key.or_else(|| server.api_key.clone());
-    if enable_admin && api_key.is_none() {
+    if (enable_admin || enable_metrics) && api_key.is_none() {
         tracing::warn!(
-            "the model management API is enabled without an API key; keep the bind address private"
+            "the model management/metrics APIs are enabled without an API key; keep the bind address private"
         );
     }
     let server_config = ServerConfig {
         api_key,
         batching,
         enable_admin,
+        enable_metrics,
         ..ServerConfig::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()

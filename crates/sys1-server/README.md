@@ -17,6 +17,8 @@ Strict TypeSafe-compatible System One HTTP server built on axum.
 | `POST` | `/api/models/{name}/reload` | Unload and load again |
 | `POST` | `/api/models` | Add a model from a reference (needs a resolver) |
 | `DELETE` | `/api/models/{name}` | Unload and remove from the live catalog |
+| `GET` | `/metrics` | Prometheus metrics (when enabled) |
+| `GET` | `/api/metrics` | JSON metrics snapshot (when enabled) |
 
 There is intentionally no `/v1/decisions`.
 
@@ -73,6 +75,31 @@ let app = router_with_resolver(
   `ModelRegistry::new` are authoritative after a restart.
 - Unload is idempotent (`was_loaded` reports the previous state). In-flight
   requests that already hold a model handle finish normally.
+
+## Metrics
+
+`ServerConfig::enable_metrics` (default `false`; the CLI enables it by default)
+registers two read-only endpoints:
+
+- `GET /metrics` — Prometheus text (`text/plain; version=0.0.4`).
+- `GET /api/metrics` — the same data as JSON.
+
+Counters accumulate from process start:
+
+- `sys1_systemone_requests_total`, `sys1_systemone_errors_total`,
+  `sys1_systemone_latency_ms_sum`, `sys1_systemone_latency_ms_max`
+- `sys1_batches_total`, `sys1_batch_items_total`, `sys1_batch_items_max`,
+  `sys1_batch_duration_ms_sum`
+- `sys1_model_loads_total`, `sys1_model_load_errors_total`,
+  `sys1_model_load_duration_ms_sum`, `sys1_model_unloads_total`
+- `sys1_model_requests_total{model="..."}` per canonical model name
+- `sys1_loaded_models`, `sys1_uptime_seconds`
+
+Both endpoints authenticate with the same Bearer key as `/v1/*` when one is
+configured. Latency sums are milliseconds; Prometheus can divide by the
+matching request/batch/load counter for means. Counters start when the HTTP
+server starts: a model loaded by `sys1 serve --preload` appears in
+`loaded`/`loaded_count` but not in `sys1_model_loads_total`.
 
 ## Behavior
 

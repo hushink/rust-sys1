@@ -406,6 +406,7 @@ async fn concurrent_requests_are_batched() {
                 max_batch: 8,
                 max_wait: Duration::from_millis(100),
             }),
+            enable_metrics: true,
             ..ServerConfig::default()
         },
     );
@@ -426,6 +427,13 @@ async fn concurrent_requests_are_batched() {
         batches.iter().any(|&size| size >= 2),
         "no request shared a batch: {batches:?}"
     );
+
+    let (status, _, body) = send(app, get("/api/metrics")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["batching"]["items"], 4);
+    assert!(value["batching"]["batches"].as_u64().unwrap() >= 1);
+    assert!(value["models"]["loads"].as_u64().unwrap() >= 1);
 }
 
 #[tokio::test]
@@ -761,6 +769,108 @@ async fn admin_add_requires_a_resolver() {
             .expect("detail")
             .contains("not configured")
     );
+}
+
+#[tokio::test]
+async fn metrics_are_disabled_by_default() {
+    let app = app(ServerConfig::default());
+    let (status, _, _) = send(app.clone(), get("/api/metrics")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = send(app, get("/metrics")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn metrics_track_systemone_and_model_lifecycle() {
+    let app = app(ServerConfig {
+        enable_admin: true,
+        enable_metrics: true,
+        batching: None,
+        ..ServerConfig::default()
+    });
+
+    let (status, _, body) = send(app.clone(), get("/api/metrics")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["systemone"]["requests"], 0);
+    assert_eq!(value["models"]["loads"], 0);
+
+    let (status, _, body) = send(app.clone(), post("/v1/systemone", noul_body())).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    let body = serde_json::json!({
+        "model": "missing",
+        "state": "hello",
+        "questions": {
+            "billing": { "type": "noul", "instructions": "Is this about billing?" }
+        }
+    })
+    .to_string();
+    let (status, _, _) = send(app.clone(), post("/v1/systemone", body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _, body) = send(app.clone(), get("/api/metrics")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["systemone"]["requests"], 2);
+    assert_eq!(value["systemone"]["errors"], 1);
+    assert_eq!(value["models"]["requests"]["laya-test"], 1);
+    assert_eq!(value["models"]["loads"], 1);
+    assert_eq!(value["models"]["loaded_count"], 1);
+    assert_eq!(value["models"]["loaded"][0], "laya-test");
+
+    let (status, headers, body) = send(app.clone(), get("/metrics")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/plain"))
+    );
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("sys1_systemone_requests_total 2"), "{text}");
+    assert!(text.contains("sys1_systemone_errors_total 1"), "{text}");
+    assert!(text.contains("sys1_model_loads_total 1"), "{text}");
+    assert!(
+        text.contains("sys1_model_requests_total{model=\"laya-test\"} 1"),
+        "{text}"
+    );
+
+    let (status, _, _) = send(app.clone(), post("/api/models/laya-test/unload", "")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, body) = send(app, get("/api/metrics")).await;
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["models"]["unloads"], 1);
+    assert_eq!(value["models"]["loaded_count"], 0);
+}
+
+#[tokio::test]
+async fn metrics_require_auth_when_configured() {
+    let app = app(ServerConfig {
+        api_key: Some("secret".to_owned()),
+        enable_metrics: true,
+        batching: None,
+        ..ServerConfig::default()
+    });
+
+    let (status, _, _) = send(app.clone(), get("/api/metrics")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/metrics")
+        .header(header::AUTHORIZATION, "Bearer secret")
+        .body(Body::empty())
+        .expect("request");
+    let (status, headers, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/plain"))
+    );
+    assert!(String::from_utf8_lossy(&body).contains("sys1_systemone_requests_total 0"));
 }
 
 #[tokio::test]

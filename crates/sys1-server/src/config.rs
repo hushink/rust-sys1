@@ -30,6 +30,9 @@ pub struct ServerConfig {
     /// Expose the `/api/models` management endpoints. Disabled by default for
     /// embedded servers; they authenticate with the same API key as `/v1/*`.
     pub enable_admin: bool,
+    /// Expose `/metrics` (Prometheus) and `/api/metrics` (JSON). Disabled by
+    /// default for embedded servers.
+    pub enable_metrics: bool,
 }
 
 impl Default for ServerConfig {
@@ -39,6 +42,7 @@ impl Default for ServerConfig {
             max_body_bytes: 32 * 1024 * 1024,
             batching: Some(BatchConfig::default()),
             enable_admin: false,
+            enable_metrics: false,
         }
     }
 }

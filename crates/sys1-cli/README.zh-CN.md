@@ -55,6 +55,9 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --max-attention-elements 67108864  # 按 attention 显存切分长 batch
 --no-batch                 # 关闭跨请求 batching
 --no-admin                 # 关闭 /api/models 管理端点
+--metrics                  # 强制开启 /metrics 与 /api/metrics
+--no-metrics               # 关闭 /metrics 与 /api/metrics
+--preload <name>           # 启动前加载，可重复
 --offline
 --cache <dir>              # 或 SYS1_CACHE
 ```
@@ -87,6 +90,14 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 `/v1/systemone` 可见。运行时添加/移除不会持久化；重启后以 `sys1.toml`
 中的 `[models]` 为准。已经持有模型句柄的请求会正常完成。
 
+`--preload NAME`（或 `[server] preload`）在监听端口前加载指定模型，避免首个
+请求承担冷加载；预加载失败会带模型名终止启动。
+
+CLI 默认开启 `/metrics`（Prometheus）与 `/api/metrics`（JSON）；`--no-metrics`
+关闭，`--metrics` 强制开启。配置 API key 时使用与 `/v1/*` 相同的 Bearer key。
+JSON 包含请求/错误/延迟、batch 大小与耗时、模型加载/卸载、按模型请求数以及
+当前常驻模型。预加载模型在 HTTP 指标启动前已常驻，因此不会增加模型加载计数。
+
 ## 配置
 
 `--config <file>` 或 `SYS1_CONFIG` 加载 TOML 配置；当前目录存在 `sys1.toml`
@@ -101,6 +112,8 @@ device = "cuda:0"
 dtype = "f16"
 batch_max = 32
 max_attention_elements = 67108864
+metrics = true
+preload = ["laya-latest"]
 
 [models]
 laya-latest = "local:D:/models/laya"

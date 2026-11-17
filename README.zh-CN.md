@@ -82,6 +82,9 @@ sys1 serve --bind 0.0.0.0:8080 --api-key secret \
 `--dtype f16` 是最高吞吐模式；`--tf32` 是可选的 F32 加速。CUDA 上 state ≥512
 token 默认启用精确 local-window attention；`--no-local-window` 退回 eager。
 
+用 `--preload laya-latest`（可重复）或 `[server] preload` 在监听端口前加载模型。
+`/metrics`（Prometheus）与 `/api/metrics`（JSON）默认开启，`--no-metrics` 关闭。
+
 ### 运行时模型管理
 
 CLI 在 `/v1` 之外暴露运维 API。默认开启，与 `/v1/*` 使用同一个 Bearer key；
@@ -110,6 +113,30 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 `[models]` 的名称。运行时添加/移除的条目不会持久化：重启后以配置中的
 `[models]` 为准。已经持有模型句柄的请求会正常完成，后续请求会重新触发懒加载。
 
+### 指标与预加载
+
+```bash
+# Prometheus 抓取
+curl -s http://127.0.0.1:8080/metrics | head
+
+# JSON 快照：请求/错误/延迟、batch 大小与耗时、模型加载/卸载、
+# 按模型请求数、当前常驻模型
+curl http://127.0.0.1:8080/api/metrics
+```
+
+配置 API key 时两个端点使用与 `/v1/*` 相同的 Bearer key。CLI 默认：指标开启、
+admin 开启；库内默认：`ServerConfig::enable_metrics = false`、
+`enable_admin = false`。
+
+```toml
+[server]
+preload = ["laya-latest"]  # 在接收请求前加载
+metrics = true
+```
+
+预加载避免首个请求承担冷加载成本（CPU Laya 约数秒）；模型不存在或加载失败会
+带模型名终止启动。
+
 ### 配置
 
 部署相关配置都可以放到 `sys1.toml`，代码里只保留内置默认值。优先级：
@@ -131,6 +158,8 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 # batch_wait_ms = 2
 # max_attention_elements = 67108864
 # local_window = true
+# metrics = true
+# preload = ["laya-latest"]
 
 [models]
 laya-latest = "local:D:/models/laya"       # 本地模型目录

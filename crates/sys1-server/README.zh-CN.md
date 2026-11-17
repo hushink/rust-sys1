@@ -17,6 +17,8 @@
 | `POST` | `/api/models/{name}/reload` | 卸载后重新加载 |
 | `POST` | `/api/models` | 从引用添加模型（需要 resolver） |
 | `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
+| `GET` | `/metrics` | Prometheus 指标（启用时） |
+| `GET` | `/api/metrics` | JSON 指标快照（启用时） |
 
 有意不实现 `/v1/decisions`。
 
@@ -70,6 +72,29 @@ let app = router_with_resolver(
   请保持绑定地址私密。
 - 运行时添加/移除不会持久化；重启后以传给 `ModelRegistry::new` 的 manifest 为准。
 - unload 是幂等的（`was_loaded` 返回之前的状态）。已经持有模型句柄的请求会正常完成。
+
+## 指标
+
+`ServerConfig::enable_metrics`（默认 `false`；CLI 默认开启）会注册两个只读端点：
+
+- `GET /metrics` — Prometheus 文本（`text/plain; version=0.0.4`）。
+- `GET /api/metrics` — 同样数据的 JSON 快照。
+
+计数器从进程启动开始累计：
+
+- `sys1_systemone_requests_total`、`sys1_systemone_errors_total`、
+  `sys1_systemone_latency_ms_sum`、`sys1_systemone_latency_ms_max`
+- `sys1_batches_total`、`sys1_batch_items_total`、`sys1_batch_items_max`、
+  `sys1_batch_duration_ms_sum`
+- `sys1_model_loads_total`、`sys1_model_load_errors_total`、
+  `sys1_model_load_duration_ms_sum`、`sys1_model_unloads_total`
+- `sys1_model_requests_total{model="..."}`（按规范化模型名）
+- `sys1_loaded_models`、`sys1_uptime_seconds`
+
+配置 API key 时，两个端点与 `/v1/*` 使用同一个 Bearer key。延迟求和单位为毫秒；
+Prometheus 中除以对应的请求/batch/加载计数即可得到均值。计数器从 HTTP 服务启动时
+开始；由 `sys1 serve --preload` 加载的模型会出现在 `loaded`/`loaded_count` 中，
+但不会计入 `sys1_model_loads_total`。
 
 ## 行为
 

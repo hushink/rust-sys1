@@ -1,10 +1,13 @@
 use crate::body::read_body;
 use crate::config::{BatchConfig, ServerConfig};
 use crate::error::{ApiError, map_model_error, map_registry_error};
+use crate::metrics::Metrics;
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, Request, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION};
+use axum::http::{
+    HeaderMap, HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION, header::CONTENT_TYPE,
+};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use serde::{Deserialize, Serialize};
@@ -40,6 +43,7 @@ pub struct AppState {
     resolver: Option<Arc<dyn ModelResolver>>,
     /// Serializes catalog mutations so add/remove snapshots cannot interleave.
     admin_lock: Arc<tokio::sync::Mutex<()>>,
+    metrics: Arc<Metrics>,
     batch: Option<mpsc::Sender<BatchItem>>,
 }
 
@@ -54,9 +58,10 @@ pub fn router_with_resolver(
     config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
 ) -> Router {
+    let metrics = Arc::new(Metrics::new());
     let batch = config.batching.as_ref().map(|batch| {
         let (sender, receiver) = mpsc::channel(batch.max_batch.saturating_mul(4).max(16));
-        tokio::spawn(run_batcher(receiver, batch.clone()));
+        tokio::spawn(run_batcher(receiver, batch.clone(), metrics.clone()));
         sender
     });
 
@@ -73,6 +78,11 @@ pub fn router_with_resolver(
             .route("/api/models/{name}/reload", post(admin_reload))
             .route("/api/models/{name}", delete(admin_remove));
     }
+    if config.enable_metrics {
+        app = app
+            .route("/metrics", get(metrics_prometheus))
+            .route("/api/metrics", get(metrics_json));
+    }
 
     app.layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -81,6 +91,7 @@ pub fn router_with_resolver(
             config,
             resolver,
             admin_lock: Arc::new(tokio::sync::Mutex::new(())),
+            metrics,
             batch,
         })
 }
@@ -90,7 +101,11 @@ pub fn router_with_resolver(
 /// request, while still giving back-to-back requests a chance to batch.
 const GATHER_GRACE: Duration = Duration::from_micros(500);
 
-async fn run_batcher(mut receiver: mpsc::Receiver<BatchItem>, config: BatchConfig) {
+async fn run_batcher(
+    mut receiver: mpsc::Receiver<BatchItem>,
+    config: BatchConfig,
+    metrics: Arc<Metrics>,
+) {
     while let Some(first) = receiver.recv().await {
         let mut items = Vec::with_capacity(config.max_batch.max(1));
         items.push(first);
@@ -136,11 +151,12 @@ async fn run_batcher(mut receiver: mpsc::Receiver<BatchItem>, config: BatchConfi
             }
         }
 
-        let _ = tokio::task::spawn_blocking(move || process_batch(items)).await;
+        let metrics = metrics.clone();
+        let _ = tokio::task::spawn_blocking(move || process_batch(items, &metrics)).await;
     }
 }
 
-fn process_batch(items: Vec<BatchItem>) {
+fn process_batch(items: Vec<BatchItem>, metrics: &Metrics) {
     let batch_size = items.len();
     let started = Instant::now();
     tracing::debug!(batch = batch_size, "batch start");
@@ -163,9 +179,11 @@ fn process_batch(items: Vec<BatchItem>) {
             let _ = item.response.send(output);
         }
     }
+    let elapsed = started.elapsed();
+    metrics.record_batch(batch_size, elapsed);
     tracing::debug!(
         batch = batch_size,
-        elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+        elapsed_ms = elapsed.as_secs_f64() * 1000.0,
         "batch done"
     );
 }
@@ -191,9 +209,17 @@ pub async fn serve_with_resolver(
 
 async fn systemone(State(state): State<AppState>, request: Request) -> Response {
     let request_id = Uuid::new_v4().to_string();
+    let started = Instant::now();
+    let metrics = state.metrics.clone();
     match handle_systemone(state, request).await {
-        Ok(response) => json_response(StatusCode::OK, response, &request_id),
-        Err(error) => json_response(error.status, error.body, &request_id),
+        Ok(response) => {
+            metrics.record_systemone(started.elapsed(), true, Some(&response.model));
+            json_response(StatusCode::OK, response, &request_id)
+        }
+        Err(error) => {
+            metrics.record_systemone(started.elapsed(), false, None);
+            json_response(error.status, error.body, &request_id)
+        }
     }
 }
 
@@ -221,14 +247,18 @@ async fn handle_systemone(
         } else {
             let requested = model.clone();
             let registry_for_acquire = registry.clone();
+            let metrics = state.metrics.clone();
             tokio::task::spawn_blocking(move || {
                 let (canonical, _) = registry_for_acquire.resolve(&requested).ok_or_else(|| {
                     RegistryError::ModelNotFound {
                         model: requested.clone(),
                     }
                 })?;
-                let model_handle = registry_for_acquire.acquire(&canonical)?;
-                Ok::<_, RegistryError>((canonical.to_owned(), model_handle))
+                let started = Instant::now();
+                let acquired = registry_for_acquire.acquire(&canonical);
+                metrics.record_model_load(started.elapsed(), acquired.is_ok());
+                let model_handle = acquired?;
+                Ok::<_, RegistryError>((canonical, model_handle))
             })
             .await
             .map_err(|error| ApiError::internal(format!("model acquisition task failed: {error}")))?
@@ -283,10 +313,47 @@ async fn handle_systemone(
         });
     }
 
-    tokio::task::spawn_blocking(move || registry.predict(&model, &wire_state, &questions))
-        .await
-        .map_err(|error| ApiError::internal(format!("inference task failed: {error}")))?
-        .map_err(map_registry_error)
+    let metrics = state.metrics.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Some((canonical, model_handle)) = registry.try_acquire(&model) {
+            let output = model_handle
+                .predict(&wire_state, &questions)
+                .map_err(|source| RegistryError::Model {
+                    model: canonical.clone(),
+                    source,
+                })?;
+            return Ok(SystemOneResponse {
+                model: canonical,
+                answers: output.answers.into_map(),
+                usage: output.usage,
+            });
+        }
+
+        let (canonical, _) =
+            registry
+                .resolve(&model)
+                .ok_or_else(|| RegistryError::ModelNotFound {
+                    model: model.clone(),
+                })?;
+        let started = Instant::now();
+        let acquired = registry.acquire(&canonical);
+        metrics.record_model_load(started.elapsed(), acquired.is_ok());
+        let model_handle = acquired?;
+        let output = model_handle
+            .predict(&wire_state, &questions)
+            .map_err(|source| RegistryError::Model {
+                model: canonical.clone(),
+                source,
+            })?;
+        Ok::<_, RegistryError>(SystemOneResponse {
+            model: canonical,
+            answers: output.answers.into_map(),
+            usage: output.usage,
+        })
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("inference task failed: {error}")))?
+    .map_err(map_registry_error)
 }
 
 async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -315,6 +382,29 @@ async fn health(State(state): State<AppState>) -> Response {
             status: "ok",
             loaded_models: state.registry.loaded_models(),
         },
+        &request_id,
+    )
+}
+
+async fn metrics_json(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = Uuid::new_v4().to_string();
+    if let Err(error) = check_auth(&state.config, &headers) {
+        return json_response(error.status, error.body, &request_id);
+    }
+    let snapshot = state.metrics.snapshot(state.registry.loaded_models());
+    json_response(StatusCode::OK, snapshot, &request_id)
+}
+
+async fn metrics_prometheus(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = Uuid::new_v4().to_string();
+    if let Err(error) = check_auth(&state.config, &headers) {
+        return json_response(error.status, error.body, &request_id);
+    }
+    let body = state.metrics.prometheus(state.registry.loaded_models());
+    text_response(
+        StatusCode::OK,
+        body,
+        "text/plain; version=0.0.4; charset=utf-8",
         &request_id,
     )
 }
@@ -422,8 +512,16 @@ async fn admin_load(
     };
 
     let registry = state.registry.clone();
+    let metrics = state.metrics.clone();
     let load_name = canonical.clone();
-    match tokio::task::spawn_blocking(move || registry.acquire(&load_name)).await {
+    match tokio::task::spawn_blocking(move || {
+        let started = Instant::now();
+        let acquired = registry.acquire(&load_name);
+        metrics.record_model_load(started.elapsed(), acquired.is_ok());
+        acquired
+    })
+    .await
+    {
         Ok(Ok(_)) => json_response(
             StatusCode::OK,
             AdminModelActionResult {
@@ -460,8 +558,17 @@ async fn admin_unload(
     };
 
     let registry = state.registry.clone();
+    let metrics = state.metrics.clone();
     let unload_name = canonical.clone();
-    match tokio::task::spawn_blocking(move || registry.unload(&unload_name)).await {
+    match tokio::task::spawn_blocking(move || {
+        let was_loaded = registry.unload(&unload_name);
+        if was_loaded {
+            metrics.record_model_unload();
+        }
+        was_loaded
+    })
+    .await
+    {
         Ok(was_loaded) => json_response(
             StatusCode::OK,
             AdminModelActionResult {
@@ -494,10 +601,16 @@ async fn admin_reload(
     };
 
     let registry = state.registry.clone();
+    let metrics = state.metrics.clone();
     let reload_name = canonical.clone();
     let result = tokio::task::spawn_blocking(move || {
         let was_loaded = registry.unload(&reload_name);
+        if was_loaded {
+            metrics.record_model_unload();
+        }
+        let started = Instant::now();
         let acquired = registry.acquire(&reload_name);
+        metrics.record_model_load(started.elapsed(), acquired.is_ok());
         (was_loaded, acquired)
     })
     .await;
@@ -645,9 +758,14 @@ async fn admin_remove(
 
     let registry = state.registry.clone();
     let resolver = state.resolver.clone();
+    let metrics = state.metrics.clone();
     let remove_name = canonical.clone();
     match tokio::task::spawn_blocking(move || {
+        let was_loaded = registry.is_loaded(&remove_name);
         let removed = registry.unregister(&remove_name);
+        if removed && was_loaded {
+            metrics.record_model_unload();
+        }
         if let Some(resolver) = resolver {
             let _ = resolver.release(&remove_name);
         }
@@ -738,6 +856,24 @@ fn validate_danger_zone(request: &SystemOneRequest, headers: &HeaderMap) -> Resu
 
 fn json_response<T: Serialize>(status: StatusCode, body: T, request_id: &str) -> Response {
     let mut response = (status, Json(body)).into_response();
+    if let Ok(value) = HeaderValue::from_str(request_id) {
+        response
+            .headers_mut()
+            .insert(HeaderName::from_static(REQUEST_ID_HEADER), value);
+    }
+    response
+}
+
+fn text_response(
+    status: StatusCode,
+    body: String,
+    content_type: &'static str,
+    request_id: &str,
+) -> Response {
+    let mut response = (status, body).into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
     if let Ok(value) = HeaderValue::from_str(request_id) {
         response
             .headers_mut()
