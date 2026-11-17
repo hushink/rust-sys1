@@ -27,7 +27,8 @@ option 行  [cls] tok(option_prefix + normalize(text + " " + option))[..max_choi
   `decima.json` 中的值。
 
 choice/noul 概率为 `softmax(scores / T)`；score 使用 Decima 的 cumulative-link
-ordinal head。
+ordinal head。token 长度相同的选项行会合并为一批编码与打分；不同长度保持分行，
+避免 padding 改变编码器的局部注意力。
 
 ## 文件
 

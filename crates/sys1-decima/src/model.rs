@@ -543,20 +543,17 @@ impl DecimaModel {
         let raw: serde_json::Value = serde_json::from_slice(&config_bytes).map_err(|error| {
             ModelError::load(format!("parse {}: {error}", config_path.display()))
         })?;
-        let is_bert = raw
-            .get("model_type")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|model_type| model_type.eq_ignore_ascii_case("bert"))
-            || raw
+        let is_bert = match raw.get("model_type").and_then(serde_json::Value::as_str) {
+            Some(model_type) => model_type.eq_ignore_ascii_case("bert"),
+            None => raw
                 .get("architectures")
                 .and_then(serde_json::Value::as_array)
                 .is_some_and(|architectures| {
-                    architectures.iter().any(|value| {
-                        value
-                            .as_str()
-                            .is_some_and(|name| name.contains("BertModel"))
-                    })
-                });
+                    architectures
+                        .iter()
+                        .any(|value| value.as_str() == Some("BertModel"))
+                }),
+        };
         let tokenizer_path = [
             encoder_dir.join("tokenizer.json"),
             checkpoint.join("tokenizer.json"),
@@ -883,27 +880,52 @@ impl DecimaModel {
         let state_mask = Tensor::ones((1, plan.state.ids.len()), self.dtype, &self.device)
             .map_err(inference_error)?;
         let state_hidden = self.encoder.forward(&state_ids, &state_mask, false)?;
-        let mut scores = Vec::with_capacity(plan.options.len());
-        let mut latent = Vec::with_capacity(plan.options.len());
-        for option in &plan.options {
-            let ids = Tensor::from_vec(option.ids.clone(), (1, option.ids.len()), &self.device)
+        // Batch options with identical row lengths. Padding would change the
+        // encoder's local attention, so rows of different lengths stay in
+        // separate groups.
+        let rows = plan.options.len();
+        let mut groups: IndexMap<usize, Vec<usize>> = IndexMap::new();
+        for (index, option) in plan.options.iter().enumerate() {
+            groups.entry(option.ids.len()).or_default().push(index);
+        }
+        let mut scores = vec![0.0_f32; rows];
+        let mut latent: Vec<Option<Tensor>> = vec![None; rows];
+        for (width, indices) in groups {
+            let mut ids = Vec::with_capacity(indices.len() * width);
+            for index in &indices {
+                ids.extend_from_slice(&plan.options[*index].ids);
+            }
+            let ids = Tensor::from_vec(ids, (indices.len(), width), &self.device)
                 .map_err(inference_error)?;
-            let mask = Tensor::ones((1, option.ids.len()), self.dtype, &self.device)
+            let mask = Tensor::ones((indices.len(), width), self.dtype, &self.device)
                 .map_err(inference_error)?;
             let hidden = self.encoder.forward(&ids, &mask, false)?;
             let (score, z) = self
                 .scorer
                 .forward(&state_hidden, &state_mask, &hidden, &mask)?;
-            scores.push(
-                score
-                    .to_dtype(DType::F32)
-                    .map_err(inference_error)?
-                    .to_vec1::<f32>()
-                    .map_err(inference_error)?[0],
-            );
-            latent.push(z);
+            let group_scores = score
+                .to_dtype(DType::F32)
+                .map_err(inference_error)?
+                .to_vec1::<f32>()
+                .map_err(inference_error)?;
+            for (row, index) in indices.into_iter().enumerate() {
+                scores[index] = group_scores[row];
+                latent[index] = Some(
+                    z.narrow(0, row, 1)
+                        .map_err(inference_error)?
+                        .contiguous()
+                        .map_err(inference_error)?,
+                );
+            }
         }
-        let z = Tensor::cat(&latent.iter().collect::<Vec<_>>(), 0).map_err(inference_error)?;
+        let z = Tensor::cat(
+            &latent
+                .into_iter()
+                .map(|value| value.expect("every option is scored"))
+                .collect::<Vec<_>>(),
+            0,
+        )
+        .map_err(inference_error)?;
         let (g, gap) = self.scorer.projections(&z)?;
         Ok((scores, g, gap))
     }

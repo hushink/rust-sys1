@@ -123,8 +123,9 @@ impl Scorer {
             .map_err(inference_error)?
             .squeeze(2)
             .map_err(inference_error)?;
+        let mask = mask.to_dtype(logits.dtype()).map_err(inference_error)?;
         let masked = logits
-            .broadcast_mul(mask)
+            .broadcast_mul(&mask)
             .map_err(inference_error)?
             .broadcast_add(
                 &((mask.affine(-1.0, 1.0)).map_err(inference_error)? * -1e4)

@@ -316,8 +316,10 @@ impl NliModel {
             }
             let has_padding = chunk.iter().any(|row| row.ids.len() != seq);
             let ids = Tensor::from_vec(ids, (batch, seq), &self.device).map_err(inference_error)?;
-            let mask =
-                Tensor::from_vec(mask, (batch, seq), &self.device).map_err(inference_error)?;
+            let mask = Tensor::from_vec(mask, (batch, seq), &self.device)
+                .map_err(inference_error)?
+                .to_dtype(self.dtype)
+                .map_err(inference_error)?;
             let hidden = self
                 .encoder
                 .forward(&ids, &mask, has_padding)

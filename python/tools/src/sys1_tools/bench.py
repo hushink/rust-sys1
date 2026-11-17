@@ -51,6 +51,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--model-name", default="laya-multilingual")
     parser.add_argument(
+        "--family",
+        default="generic",
+        choices=["generic", "qwen3guard"],
+        help="question preset: generic noul/score/choice, or Qwen3Guard's fixed questions",
+    )
+    parser.add_argument(
         "--exe",
         type=Path,
         default=Path(os.environ["SYS1_BENCH_EXE"]) if os.environ.get("SYS1_BENCH_EXE") else None,
@@ -68,6 +74,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--batch-wait-ms", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECS)
     parser.add_argument("--no-batch", action="store_true")
+    parser.add_argument(
+        "--no-concurrent",
+        action="store_true",
+        help="skip the fixed x4/x8 concurrency scenarios (and the concurrency sweep)",
+    )
     parser.add_argument("--tf32", action="store_true")
     parser.add_argument("--unique-states", action="store_true")
     parser.add_argument("--concurrency-sweep", action="store_true")
@@ -140,6 +151,7 @@ def run(args: argparse.Namespace) -> int:
         "cpu_logical": os.cpu_count(),
         "ram_gib": _ram_gib(),
         "model": args.model_name,
+        "family": args.family,
         "dtype": args.dtype,
         "device": args.device,
         "model_dir": str(model_dir),
@@ -157,48 +169,107 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _qwen3guard_questions(full: bool) -> dict[str, Any]:
+    questions: dict[str, Any] = {
+        "unsafe": {
+            "type": "noul",
+            "instructions": "The content is unsafe.",
+        }
+    }
+    if full:
+        questions["safety"] = {
+            "type": "choice",
+            "criteria": {
+                "safe": None,
+                "controversial": None,
+                "unsafe": None,
+            },
+        }
+        questions["category"] = {
+            "type": "choice",
+            "criteria": {
+                label: None
+                for label in [
+                    "none",
+                    "violent",
+                    "non_violent_illegal",
+                    "sexual",
+                    "pii",
+                    "suicide_self_harm",
+                    "unethical",
+                    "politically_sensitive",
+                    "copyright",
+                    "jailbreak",
+                ]
+            },
+        }
+    return questions
+
+
 def _run_scenarios(
     client: httpx.Client, base: str, args: argparse.Namespace
 ) -> dict[str, list[dict[str, Any]]]:
-    noul = json.dumps(
-        {
-            "model": args.model_name,
-            "state": STATE_TEXT,
-            "questions": {
-                "billing": {
-                    "type": "noul",
-                    "instructions": "Is this message about billing?",
-                }
+    if args.family == "qwen3guard":
+        noul = json.dumps(
+            {
+                "model": args.model_name,
+                "state": STATE_TEXT,
+                "questions": _qwen3guard_questions(False),
             },
-        },
-        separators=(",", ":"),
-    )
-    batch3 = json.dumps(
-        {
-            "model": args.model_name,
-            "state": STATE_TEXT,
-            "questions": {
-                "billing": {
-                    "type": "noul",
-                    "instructions": "Is this message about billing?",
+            separators=(",", ":"),
+        )
+        batch3 = json.dumps(
+            {
+                "model": args.model_name,
+                "state": STATE_TEXT,
+                "questions": _qwen3guard_questions(True),
+            },
+            separators=(",", ":"),
+        )
+        noul_label = "POST unsafe noul"
+        batch_label = "POST safety+unsafe+category"
+    else:
+        noul = json.dumps(
+            {
+                "model": args.model_name,
+                "state": STATE_TEXT,
+                "questions": {
+                    "billing": {
+                        "type": "noul",
+                        "instructions": "Is this message about billing?",
+                    }
                 },
-                "urgency": {
-                    "type": "score",
-                    "instructions": "How urgent is this message?",
-                    "criteria": ["Can wait", "This week", "Today"],
-                },
-                "tone": {
-                    "type": "choice",
-                    "instructions": "What is the tone of this message?",
-                    "criteria": {
-                        "angry": "An upset or hostile message",
-                        "calm": "A neutral or polite message",
+            },
+            separators=(",", ":"),
+        )
+        batch3 = json.dumps(
+            {
+                "model": args.model_name,
+                "state": STATE_TEXT,
+                "questions": {
+                    "billing": {
+                        "type": "noul",
+                        "instructions": "Is this message about billing?",
+                    },
+                    "urgency": {
+                        "type": "score",
+                        "instructions": "How urgent is this message?",
+                        "criteria": ["Can wait", "This week", "Today"],
+                    },
+                    "tone": {
+                        "type": "choice",
+                        "instructions": "What is the tone of this message?",
+                        "criteria": {
+                            "angry": "An upset or hostile message",
+                            "calm": "A neutral or polite message",
+                        },
                     },
                 },
             },
-        },
-        separators=(",", ":"),
-    )
+            separators=(",", ":"),
+        )
+        noul_label = "POST noul"
+        batch_label = "POST noul+score+choice"
 
     # The first request loads the checkpoint.
     _post_json(client, f"{base}/v1/systemone", noul)
@@ -206,16 +277,25 @@ def _run_scenarios(
     results = [
         _measure_sequential_gets(client, base, "GET /health", "/health", 50, args.warmup),
         _measure_sequential_gets(client, base, "GET /v1/models", "/v1/models", 50, args.warmup),
-        _measure_sequential_posts(client, base, "POST noul", noul, args.sequential, args.warmup),
+        _measure_sequential_posts(client, base, noul_label, noul, args.sequential, args.warmup),
         _measure_sequential_posts(
-            client, base, "POST noul+score+choice", batch3, args.batch_sequential, args.warmup
+            client, base, batch_label, batch3, args.batch_sequential, args.warmup
         ),
-        _measure_concurrent(base, "POST noul x4", noul, 4, 5, args.unique_states, args.timeout),
-        _measure_concurrent(base, "POST noul x8", noul, 8, 5, args.unique_states, args.timeout),
     ]
+    if not args.no_concurrent:
+        results.extend(
+            [
+                _measure_concurrent(
+                    base, "POST noul x4", noul, 4, 5, args.unique_states, args.timeout
+                ),
+                _measure_concurrent(
+                    base, "POST noul x8", noul, 8, 5, args.unique_states, args.timeout
+                ),
+            ]
+        )
 
     concurrency: list[dict[str, Any]] = []
-    if args.concurrency_sweep:
+    if args.concurrency_sweep and not args.no_concurrent:
         for workers in (1, 2, 4, 8, 16, 32):
             concurrency.append(
                 _measure_concurrent(
@@ -230,8 +310,13 @@ def _run_scenarios(
             )
 
     options: list[dict[str, Any]] = []
-    if args.option_sweep:
-        for count in (1, 2, 3, 5, 10, 20, 40):
+    if args.option_sweep and args.family == "qwen3guard":
+        print(
+            "Qwen3Guard accepts only its fixed questions; skipping the option sweep.",
+            file=sys.stderr,
+        )
+    elif args.option_sweep:
+        for count in (2, 3, 5, 10, 20, 40):
             options.append(
                 _measure_option(client, base, args, "choice", count, args.option_requests)
             )

@@ -102,7 +102,7 @@ impl Scorer {
         let text = text
             .unsqueeze(1)?
             .broadcast_as((text.dim(0)?, count, hidden))?;
-        let combined = Tensor::cat(&[&text, labels], candle_core::D::Minus1)?;
+        let combined = Tensor::cat(&[&text, labels], candle_core::D::Minus1)?.contiguous()?;
         combined
             .apply(&self.linear1)?
             .relu()?
@@ -425,7 +425,7 @@ impl GliclassModel {
                 .clamp(1.0, f32::MAX)
                 .map_err(inference_error)?;
             let classes = spans
-                .matmul(&hidden)
+                .matmul(&hidden.contiguous().map_err(inference_error)?)
                 .map_err(inference_error)?
                 .broadcast_div(&counts.unsqueeze(2).map_err(inference_error)?)
                 .map_err(inference_error)?;
@@ -436,11 +436,11 @@ impl GliclassModel {
                 .map_err(inference_error)?;
             let text = self
                 .text_projector
-                .forward(&text)
+                .forward(&text.contiguous().map_err(inference_error)?)
                 .map_err(inference_error)?;
             let classes = self
                 .classes_projector
-                .forward(&classes)
+                .forward(&classes.contiguous().map_err(inference_error)?)
                 .map_err(inference_error)?;
             let logits = self
                 .scorer

@@ -77,15 +77,20 @@ cargo build --release --offline -p sys1-cli
 
 ```bash
 uv run sys1-bench --model-dir /path/to/laya-multilingual
+uv run sys1-bench --model-dir /path/to/decima-small --model-name decima-small
+uv run sys1-bench --model-dir ... --family qwen3guard --model-name guard
 uv run sys1-bench --model-dir ... --concurrency-sweep --option-sweep
 uv run sys1-bench --model-dir ... --json
 ```
 
 工具会在 `127.0.0.1:18082` 启动 `sys1 serve`，等待 `/health`，运行与原
 PowerShell 脚本相同的场景，打印 markdown 友好表格，并在退出时停止服务。
-参数与原脚本对应：`--exe`、`--model-name`、`--device`、`--dtype`、
-`--confidence`、`--warmup`、`--sequential`、`--batch-sequential`、
-`--option-requests`、`--batch-max`、`--batch-wait-ms`、`--no-batch`、
+`--family generic` 发送 noul/score/choice 问题；`--family qwen3guard` 发送
+Qwen3Guard 固定的 safety、unsafe 与 category 问题（任意选项会被拒绝，因此跳过
+option sweep）。参数与原脚本对应：`--exe`、`--model-name`、`--device`、
+`--dtype`、`--confidence`、`--warmup`、`--sequential`、
+`--batch-sequential`、`--option-requests`、`--batch-max`、`--batch-wait-ms`、
+`--no-batch`、`--no-concurrent`（跳过固定 x4/x8 场景，适合慢速 decoder）、
 `--tf32`、`--unique-states`、`--json`。`SYS1_BENCH_MODEL` 与
 `SYS1_BENCH_EXE` 提供相同默认值。
 

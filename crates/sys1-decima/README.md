@@ -31,7 +31,9 @@ option row  [cls] tok(option_prefix + normalize(text + " " + option))[..max_choi
   `[families.decima] choice_fit`) overrides the value from `decima.json`.
 
 Choice and noul probabilities are `softmax(scores / T)`. Score questions use
-Decima's cumulative-link ordinal head on the same scores.
+Decima's cumulative-link ordinal head on the same scores. Option rows with the
+same token length are encoded and scored as one batch; rows of different
+lengths stay separate so padding cannot change the encoder's local attention.
 
 ## Files
 

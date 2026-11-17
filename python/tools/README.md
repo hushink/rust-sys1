@@ -78,16 +78,23 @@ Then point the benchmark at a local checkpoint:
 
 ```bash
 uv run sys1-bench --model-dir /path/to/laya-multilingual
+uv run sys1-bench --model-dir /path/to/decima-small --model-name decima-small
+uv run sys1-bench --model-dir ... --family qwen3guard --model-name guard
 uv run sys1-bench --model-dir ... --concurrency-sweep --option-sweep
 uv run sys1-bench --model-dir ... --json
 ```
 
 The tool starts `sys1 serve` on `127.0.0.1:18082`, waits for `/health`, runs
 the same scenarios as the old PowerShell script, prints markdown-friendly
-tables, and stops the server on exit. Useful flags mirror the old script:
+tables, and stops the server on exit. `--family generic` sends noul, score and
+choice questions; `--family qwen3guard` sends the guard's fixed safety,
+unsafe and category questions (the option sweep is skipped because arbitrary
+choices are rejected). Useful flags mirror the old script:
 `--exe`, `--model-name`, `--device`, `--dtype`, `--confidence`, `--warmup`,
 `--sequential`, `--batch-sequential`, `--option-requests`, `--batch-max`,
-`--batch-wait-ms`, `--no-batch`, `--tf32`, `--unique-states`, and `--json`.
+`--batch-wait-ms`, `--no-batch`, `--no-concurrent` (skip the fixed x4/x8
+scenarios, useful for slow decoder families), `--tf32`, `--unique-states`, and
+`--json`.
 `SYS1_BENCH_MODEL` and `SYS1_BENCH_EXE` provide the same defaults.
 
 ## Development
