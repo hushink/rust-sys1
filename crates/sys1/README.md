@@ -96,6 +96,8 @@ keeps working, and Laya types are also available under `sys1::laya`.
 cargo test --offline -p sys1
 ```
 
+`tests/naming.rs` enforces that no crate except `sys1-laya` defines
+Laya-prefixed items; compatibility re-exports at the `sys1` root are allowed.
 The real-checkpoint engine test is ignored by default:
 
 ```powershell

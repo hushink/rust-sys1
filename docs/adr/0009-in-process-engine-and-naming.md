@@ -4,4 +4,4 @@
 
 **考虑过的替代方案**：把 Engine 放 `sys1-laya`（SDK 会显得 Laya 专属，违背可替换模型族目标）；让 Engine 对 factory/backend 泛型化（v1 只有 Laya，trait 复杂度与测试成本过高，待第二种 family 落地再抽象）；移除 umbrella 的 Laya 扁平导出（破坏已有用户代码，且再导出不是重新命名）；在 Engine 与 CLI 各写一份本地 checkpoint 清单（两处漂移）。CLI 继续使用通用命名的组合层 resolver，不把 hub 拉进 `sys1-core`。
 
-**后果**：原有 `use sys1::{LayaModel, LayaOptions}` 调用保持不变，`InferenceEngine` 是纯增量入口；新增模型族时可复用 Engine 的命名与生命周期接口，不必再暴露族名；本地裸 checkpoint 的 manifest 生成与 router/variant 注册只有一份实现；Engine 目前绑定 Laya 后端，泛型化留待第二种 backend。
+**后果**：原有 `use sys1::{LayaModel, LayaOptions}` 调用保持不变，`InferenceEngine` 是纯增量入口；新增模型族时可复用 Engine 的命名与生命周期接口，不必再暴露族名；本地裸 checkpoint 的 manifest 生成与 router/variant 注册只有一份实现；Engine 目前绑定 Laya 后端，泛型化留待第二种 backend。`crates/sys1/tests/naming.rs` 会扫描除 `sys1-laya` 外的所有源码/测试/示例，阻止新增 Laya 前缀定义；`sys1` 根部的兼容再导出不在此限制内。

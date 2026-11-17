@@ -90,7 +90,8 @@ Laya 类型也可通过 `sys1::laya` 访问。
 cargo test --offline -p sys1
 ```
 
-真实 checkpoint 的 engine 测试默认忽略：
+`tests/naming.rs` 会检查除 `sys1-laya` 外的 crate 不定义 Laya 前缀项；
+`sys1` 根部的兼容再导出允许保留。真实 checkpoint 的 engine 测试默认忽略：
 
 ```powershell
 $env:SYS1_LAYA_TEST_ROOT="C:/path/to/laya-multilingual"
