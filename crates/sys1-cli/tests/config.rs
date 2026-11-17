@@ -18,6 +18,7 @@ fn sys1() -> Command {
     for key in [
         "SYS1_CONFIG",
         "SYS1_CACHE",
+        "SYS1_MAX_CACHE_BYTES",
         "SYS1_LOG_LEVEL",
         "SYS1_LOG_FORMAT",
         "SYS1_LOG_FILE",
@@ -70,6 +71,34 @@ fn cli_cache_overrides_config() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("from-cli"), "{stdout}");
     assert!(!stdout.contains("from-config"), "{stdout}");
+}
+
+#[test]
+fn doctor_reports_cache_quota_and_cli_overrides_config() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("sys1.toml"),
+        "[hub]\ncache_dir = \"models\"\nmax_cache_bytes = 2048\n",
+    )
+    .expect("config");
+
+    let output = sys1()
+        .current_dir(dir.path())
+        .arg("doctor")
+        .output()
+        .expect("run sys1 doctor");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache limit: 2.0 KiB"), "{stdout}");
+
+    let output = sys1()
+        .current_dir(dir.path())
+        .args(["--max-cache-bytes", "1048576", "doctor"])
+        .output()
+        .expect("run sys1 doctor");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cache limit: 1.0 MiB"), "{stdout}");
 }
 
 #[test]

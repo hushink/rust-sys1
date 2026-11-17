@@ -84,6 +84,7 @@ Useful flags:
 --no-cors                  # disable CORS headers
 --offline
 --cache <dir>              # or SYS1_CACHE
+--max-cache-bytes <bytes>  # or SYS1_MAX_CACHE_BYTES; 0 = unlimited
 ```
 
 ## Model management API
@@ -112,13 +113,33 @@ curl -X POST http://127.0.0.1:8080/api/models \
   -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 
-# Disk cache: list keys, then delete one by key. Resident models must be
-# unloaded first (409 otherwise).
+# Disk cache: list keys, then delete one by key. Resident models and active
+# downloads must finish/unload first (409 otherwise).
 curl http://127.0.0.1:8080/api/cache
 curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 
 # After editing [models] in sys1.toml:
 curl -X POST http://127.0.0.1:8080/api/config/reload
+```
+
+`GET /api/cache` returns `cache_dir`, `limit_bytes`, `used_bytes`,
+`free_bytes`, `reclaimable_bytes`, `model_count`, `resident_count`, and the
+`models` array. Each model includes `key`, `name`, `directory`, actual
+`size_bytes`, `last_used_unix`, `evictable`, and its `files`.
+
+When `[hub] max_cache_bytes` is set, each pull first evicts the
+least-recently-used non-resident cache entries until the new files fit.
+Resident models in this process and active downloads are protected;
+`reclaimable_bytes` shows what eviction could free now. A model larger than
+the whole quota, or one blocked by resident entries, fails with
+`cache quota exceeded`. Cache hits still enforce the quota. `sys1 rm` is an
+explicit deletion and cannot detect models resident in another process; stop
+that process or unload the model first.
+
+```bash
+# Remove one cached model and show current usage
+sys1 rm laya-multilingual
+sys1 list
 ```
 
 Adding a reference materializes it through the hub (unless cached) and makes it
@@ -167,6 +188,7 @@ override the file, which overrides built-in defaults.
 ```toml
 [hub]
 cache_dir = "D:/models/sys1-cache"
+max_cache_bytes = 34359738368   # omit or 0 = unlimited
 
 [server]
 device = "cuda:0"

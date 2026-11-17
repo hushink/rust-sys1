@@ -3,11 +3,90 @@ use crate::{
     ModelSource, SourceContext, download,
 };
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use sys1_core::ModelManifest;
+
+/// A file recorded in a cache entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CacheFile {
+    pub path: String,
+    pub size: u64,
+}
+
+/// A model directory under `<cache_dir>/models`.
+#[derive(Clone, Debug)]
+pub struct CacheEntry {
+    pub key: String,
+    pub name: String,
+    pub directory: PathBuf,
+    /// Actual bytes used by the directory, including `model.json`.
+    pub size_bytes: u64,
+    /// Manifest modification time; updated when a pull completes.
+    pub last_used: SystemTime,
+    pub files: Vec<CacheFile>,
+    pub resident: bool,
+    /// Whether the entry can be evicted right now. Resident models and active
+    /// pulls are not evictable.
+    pub evictable: bool,
+}
+
+/// Cache totals for `/api/cache` and `sys1 doctor`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheUsage {
+    pub limit_bytes: Option<u64>,
+    pub used_bytes: u64,
+    pub free_bytes: Option<u64>,
+    pub reclaimable_bytes: u64,
+    pub model_count: usize,
+    pub resident_count: usize,
+}
+
+/// One entry removed by quota enforcement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvictedCacheEntry {
+    pub key: String,
+    pub name: String,
+    pub size_bytes: u64,
+}
+
+/// Result of [`Hub::enforce_quota`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CacheEviction {
+    pub entries: Vec<EvictedCacheEntry>,
+    pub freed_bytes: u64,
+}
+
+/// Lets the hub avoid evicting models that an embedding application still has
+/// loaded. `sys1-cli` and `InferenceEngine` install a registry-backed
+/// implementation; a bare [`Hub`] has no resident models.
+pub trait CacheResidency: Send + Sync {
+    fn is_resident(&self, model_name: &str) -> bool;
+}
+
+#[derive(Default)]
+struct CacheState {
+    active_pulls: HashSet<String>,
+}
+
+struct ActivePull<'a> {
+    hub: &'a Hub,
+    key: String,
+}
+
+impl Drop for ActivePull<'_> {
+    fn drop(&mut self) {
+        self.hub
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .active_pulls
+            .remove(&self.key);
+    }
+}
 
 /// A resolved and materialized model.
 #[derive(Clone, Debug)]
@@ -23,6 +102,8 @@ pub struct Hub {
     client: reqwest::blocking::Client,
     sources: Vec<Arc<dyn ModelSource>>,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    residency: Mutex<Option<Arc<dyn CacheResidency>>>,
+    cache_state: Mutex<CacheState>,
 }
 
 impl Hub {
@@ -55,11 +136,70 @@ impl Hub {
             client,
             sources,
             locks: Mutex::new(HashMap::new()),
+            residency: Mutex::new(None),
+            cache_state: Mutex::new(CacheState::default()),
         })
     }
 
     pub fn config(&self) -> &HubConfig {
         &self.config
+    }
+
+    /// Install the residency provider used by quota eviction.
+    ///
+    /// Without a provider every cache entry is treated as non-resident.
+    pub fn set_residency(&self, residency: Arc<dyn CacheResidency>) {
+        *self
+            .residency
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(residency);
+    }
+
+    /// Cached model directories with sizes, timestamps, and eviction state.
+    pub fn cache_entries(&self) -> Result<Vec<CacheEntry>, HubError> {
+        let state = self
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.scan_entries(&state)
+    }
+
+    /// Current disk usage and quota headroom.
+    pub fn cache_usage(&self) -> Result<CacheUsage, HubError> {
+        let state = self
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entries = self.scan_entries(&state)?;
+        let used_bytes = entries.iter().map(|entry| entry.size_bytes).sum();
+        let reclaimable_bytes = entries
+            .iter()
+            .filter(|entry| entry.evictable)
+            .map(|entry| entry.size_bytes)
+            .sum();
+        let limit_bytes = self.active_limit();
+        Ok(CacheUsage {
+            limit_bytes,
+            used_bytes,
+            free_bytes: limit_bytes.map(|limit| limit.saturating_sub(used_bytes)),
+            reclaimable_bytes,
+            model_count: entries.len(),
+            resident_count: entries.iter().filter(|entry| entry.resident).count(),
+        })
+    }
+
+    /// Evict least-recently-used non-resident entries until
+    /// `used + additional_bytes` fits the configured quota.
+    ///
+    /// Returns an empty report when no quota is configured. A model larger
+    /// than the quota, or one blocked by resident/active entries, returns
+    /// [`HubError::CacheQuotaExceeded`].
+    pub fn enforce_quota(&self, additional_bytes: u64) -> Result<CacheEviction, HubError> {
+        let state = self
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.enforce_quota_locked(additional_bytes, None, &state)
     }
 
     /// Resolve a reference to a manifest without downloading model files.
@@ -100,10 +240,13 @@ impl Hub {
 
         let cache_key = source.cache_key(&reference);
         let model_dir = self.config.cache_dir.join("models").join(&cache_key);
-        fs::create_dir_all(&model_dir).map_err(|error| HubError::io(&model_dir, error))?;
 
         let lock = self.lock_for(&cache_key);
         let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let required = required_bytes(&manifest, &model_dir)?;
+        let _active = self.begin_pull(&cache_key, required)?;
+
+        fs::create_dir_all(&model_dir).map_err(|error| HubError::io(&model_dir, error))?;
 
         let mut files = IndexMap::new();
         for file in &manifest.files {
@@ -125,6 +268,7 @@ impl Hub {
         }
 
         write_manifest(&model_dir, &manifest)?;
+        touch_manifest(&model_dir);
         Ok(PulledModel {
             manifest,
             directory: model_dir,
@@ -148,6 +292,19 @@ impl Hub {
         let reference: ModelRef = reference.parse()?;
         let source = self.source_for(&reference)?;
         let cache_key = source.cache_key(&reference);
+        if let Some(model) = self.resident_model(&cache_key) {
+            return Err(HubError::CacheResident {
+                key: cache_key,
+                model,
+            });
+        }
+        let state = self
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_pulls.contains(&cache_key) {
+            return Err(HubError::CacheBusy { key: cache_key });
+        }
         let directory = self.config.cache_dir.join("models").join(&cache_key);
         let removed = if directory.exists() {
             fs::remove_dir_all(&directory).map_err(|error| HubError::io(&directory, error))?;
@@ -172,6 +329,21 @@ impl Hub {
             return Err(HubError::InvalidData {
                 url: key.to_owned(),
                 message: "invalid model cache key".to_owned(),
+            });
+        }
+        if let Some(model) = self.resident_model(key) {
+            return Err(HubError::CacheResident {
+                key: key.to_owned(),
+                model,
+            });
+        }
+        let state = self
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_pulls.contains(key) {
+            return Err(HubError::CacheBusy {
+                key: key.to_owned(),
             });
         }
         let directory = self.config.cache_dir.join("models").join(key);
@@ -232,6 +404,231 @@ impl Hub {
         }
         models.sort_by(|left, right| left.manifest.name.cmp(&right.manifest.name));
         Ok(models)
+    }
+
+    fn active_limit(&self) -> Option<u64> {
+        self.config.max_cache_bytes.filter(|limit| *limit > 0)
+    }
+
+    fn begin_pull(&self, key: &str, additional: u64) -> Result<ActivePull<'_>, HubError> {
+        let mut state = self
+            .cache_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active_pulls.insert(key.to_owned());
+        let eviction = match self.enforce_quota_locked(additional, Some(key), &state) {
+            Ok(eviction) => eviction,
+            Err(error) => {
+                state.active_pulls.remove(key);
+                return Err(error);
+            }
+        };
+        if !eviction.entries.is_empty() {
+            tracing::info!(
+                entries = eviction.entries.len(),
+                freed_bytes = eviction.freed_bytes,
+                "evicted cache entries for quota"
+            );
+        }
+        Ok(ActivePull {
+            hub: self,
+            key: key.to_owned(),
+        })
+    }
+
+    fn enforce_quota_locked(
+        &self,
+        additional: u64,
+        current_key: Option<&str>,
+        state: &CacheState,
+    ) -> Result<CacheEviction, HubError> {
+        let Some(limit) = self.active_limit() else {
+            return Ok(CacheEviction::default());
+        };
+        let entries = self.scan_entries(state)?;
+        let used: u64 = entries.iter().map(|entry| entry.size_bytes).sum();
+        let reclaimable: u64 = entries
+            .iter()
+            .filter(|entry| entry.evictable)
+            .map(|entry| entry.size_bytes)
+            .sum();
+        if additional > limit {
+            return Err(HubError::CacheQuotaExceeded {
+                limit,
+                used,
+                additional,
+                reclaimable,
+            });
+        }
+        if used.saturating_add(additional) <= limit {
+            return Ok(CacheEviction::default());
+        }
+
+        let mut result = CacheEviction::default();
+        let mut evicted = HashSet::new();
+        for entry in entries
+            .iter()
+            .filter(|entry| entry.evictable && current_key != Some(entry.key.as_str()))
+        {
+            if used
+                .saturating_sub(result.freed_bytes)
+                .saturating_add(additional)
+                <= limit
+            {
+                break;
+            }
+            if self.resident_model(&entry.key).is_some() {
+                continue;
+            }
+            self.remove_entry(entry)?;
+            result.freed_bytes = result.freed_bytes.saturating_add(entry.size_bytes);
+            evicted.insert(entry.key.clone());
+            result.entries.push(EvictedCacheEntry {
+                key: entry.key.clone(),
+                name: entry.name.clone(),
+                size_bytes: entry.size_bytes,
+            });
+        }
+
+        let remaining_used = used.saturating_sub(result.freed_bytes);
+        if remaining_used.saturating_add(additional) > limit {
+            let reclaimable = entries
+                .iter()
+                .filter(|entry| {
+                    entry.evictable
+                        && !evicted.contains(&entry.key)
+                        && self.resident_model(&entry.key).is_none()
+                })
+                .map(|entry| entry.size_bytes)
+                .sum();
+            return Err(HubError::CacheQuotaExceeded {
+                limit,
+                used: remaining_used,
+                additional,
+                reclaimable,
+            });
+        }
+        Ok(result)
+    }
+
+    fn scan_entries(&self, state: &CacheState) -> Result<Vec<CacheEntry>, HubError> {
+        let models_dir = self.config.cache_dir.join("models");
+        if !models_dir.is_dir() {
+            return Ok(Vec::new());
+        }
+        let residency = self
+            .residency
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let mut entries = Vec::new();
+        let read_dir =
+            fs::read_dir(&models_dir).map_err(|error| HubError::io(&models_dir, error))?;
+        for entry in read_dir {
+            let entry = entry.map_err(|error| HubError::io(&models_dir, error))?;
+            let directory = entry.path();
+            if !directory.is_dir() {
+                continue;
+            }
+            let Some(key) = directory
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|key| is_cache_key(key))
+                .map(str::to_owned)
+            else {
+                continue;
+            };
+
+            let manifest_path = directory.join("model.json");
+            let (name, files) = match fs::read(&manifest_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<ModelManifest>(&bytes).ok())
+                .filter(|manifest| manifest.validate().is_ok())
+            {
+                Some(manifest) => {
+                    let files = manifest
+                        .files
+                        .iter()
+                        .map(|file| {
+                            let size = fs::metadata(directory.join(&file.path))
+                                .map(|metadata| metadata.len())
+                                .unwrap_or(file.size);
+                            CacheFile {
+                                path: file.path.clone(),
+                                size,
+                            }
+                        })
+                        .collect();
+                    (manifest.name, files)
+                }
+                None => (key.clone(), Vec::new()),
+            };
+
+            let size_bytes = directory_size(&directory)?;
+            let last_used = fs::metadata(&manifest_path)
+                .and_then(|metadata| metadata.modified())
+                .or_else(|_| fs::metadata(&directory).and_then(|metadata| metadata.modified()))
+                .unwrap_or(UNIX_EPOCH);
+            let resident = residency
+                .as_ref()
+                .map(|residency| residency.is_resident(&name))
+                .unwrap_or(false);
+            entries.push(CacheEntry {
+                key: key.clone(),
+                name,
+                directory,
+                size_bytes,
+                last_used,
+                files,
+                resident,
+                evictable: !resident && !state.active_pulls.contains(&key),
+            });
+        }
+        entries.sort_by(|left, right| {
+            left.last_used
+                .cmp(&right.last_used)
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        Ok(entries)
+    }
+
+    fn resident_model(&self, key: &str) -> Option<String> {
+        let residency = self
+            .residency
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()?;
+        let manifest_path = self
+            .config
+            .cache_dir
+            .join("models")
+            .join(key)
+            .join("model.json");
+        let name = fs::read(&manifest_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<ModelManifest>(&bytes).ok())
+            .filter(|manifest| manifest.validate().is_ok())
+            .map(|manifest| manifest.name)
+            .unwrap_or_else(|| key.to_owned());
+        residency.is_resident(&name).then_some(name)
+    }
+
+    fn remove_entry(&self, entry: &CacheEntry) -> Result<(), HubError> {
+        if entry.directory.is_dir() {
+            fs::remove_dir_all(&entry.directory)
+                .map_err(|error| HubError::io(&entry.directory, error))?;
+        }
+        let manifest = self.cache_manifest_path(&entry.key);
+        if manifest.is_file() {
+            fs::remove_file(&manifest).map_err(|error| HubError::io(&manifest, error))?;
+        }
+        tracing::info!(
+            key = %entry.key,
+            model = %entry.name,
+            size_bytes = entry.size_bytes,
+            "evicted model from cache"
+        );
+        Ok(())
     }
 
     fn resolve_ref(
@@ -298,6 +695,45 @@ impl Hub {
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
+}
+
+fn required_bytes(manifest: &ModelManifest, directory: &Path) -> Result<u64, HubError> {
+    let mut required = 0_u64;
+    for file in &manifest.files {
+        let destination = directory.join(&file.path);
+        let existing = fs::metadata(&destination)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let partial = fs::metadata(download::partial_path(&destination))
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let reusable = existing.min(file.size).max(partial.min(file.size));
+        required = required.saturating_add(file.size.saturating_sub(reusable));
+    }
+    Ok(required)
+}
+
+fn directory_size(directory: &Path) -> Result<u64, HubError> {
+    let mut total = 0_u64;
+    for entry in fs::read_dir(directory).map_err(|error| HubError::io(directory, error))? {
+        let entry = entry.map_err(|error| HubError::io(directory, error))?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|error| HubError::io(&path, error))?;
+        if metadata.is_dir() {
+            total = total.saturating_add(directory_size(&path)?);
+        } else {
+            total = total.saturating_add(metadata.len());
+        }
+    }
+    Ok(total)
+}
+
+fn touch_manifest(directory: &Path) {
+    let path = directory.join("model.json");
+    let Ok(file) = fs::File::options().read(true).write(true).open(&path) else {
+        return;
+    };
+    let _ = file.set_modified(SystemTime::now());
 }
 
 fn is_cache_key(key: &str) -> bool {

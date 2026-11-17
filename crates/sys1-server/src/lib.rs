@@ -11,7 +11,7 @@ mod reload;
 mod server;
 mod telemetry;
 
-pub use cache::{CacheManager, CachedFile, CachedModel};
+pub use cache::{CacheManager, CacheRemoveError, CacheUsage, CachedFile, CachedModel};
 pub use config::{BatchConfig, ServerConfig};
 pub use reload::{ConfigReload, ConfigReloader, ReloadError};
 pub use server::{

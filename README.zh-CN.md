@@ -17,7 +17,7 @@
 - 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
 - 纯 NumPy 的 Laya→ONNX 导出器，与官方 golden logits 最大误差 2.5e-6。
 - 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
-- 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁。
+- 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁、按字节配额 LRU 淘汰。
 - 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理。
 - 运行时模型管理：无需重启即可加载、卸载、重载、添加和移除模型。
 - 可观测性：Prometheus/JSON 指标、可替换 telemetry、W3C `traceparent`、text/JSON/文件日志。
@@ -219,6 +219,7 @@ sys1 serve --log-level "sys1=debug,tower_http=info" \
 ```toml
 [hub]
 cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
+# max_cache_bytes = 34359738368    # 省略或 0 = 不限制；pull 前按 LRU 淘汰
 # hf_endpoint = "https://huggingface.co"
 # modelscope_endpoint = "https://modelscope.cn"
 
@@ -245,6 +246,13 @@ laya-latest = "local:D:/models/laya"       # 本地模型目录
 配置文件中的相对路径按配置文件所在目录解析。`[models]` 中的名称可用于
 `serve`、`run`、`pull`、`show`、`rm`。凭据建议通过 `HF_TOKEN`、
 `MODELSCOPE_API_TOKEN`、`SYS1_HUB_TOKEN` 环境变量提供。
+
+配置 `[hub] max_cache_bytes`（或 `--max-cache-bytes` /
+`SYS1_MAX_CACHE_BYTES`）后，每次 pull 会按 LRU 淘汰非驻留缓存条目，直到新文件
+能够放入配额。服务进程内的常驻模型与进行中的下载受保护；模型本身大于配额时
+返回 `cache quota exceeded`。`GET /api/cache` 返回 `limit_bytes`、
+`used_bytes`、`free_bytes`、`reclaimable_bytes`，`sys1 list` 也会打印相同汇总。
+`sys1 rm` 仍是显式删除；请先停止其他服务进程或卸载其中的模型。
 
 ### 调用
 

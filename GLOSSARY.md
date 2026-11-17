@@ -122,6 +122,14 @@ _Avoid_: Model source、downloader
 模型目录项对应的权重当前是否已加载到内存或显存；与磁盘缓存无关。
 _Avoid_: Cache（磁盘缓存）、loaded（口语）
 
+**Cache quota（缓存配额）**：
+允许 `<cache_dir>/models` 使用的最大字节数；超出时按 LRU 淘汰非驻留条目。
+_Avoid_: Cache limit（与单模型加载上限混淆）、disk full policy
+
+**Reclaimable space（可回收空间）**：
+当前可被配额淘汰立即释放的字节数，即所有 `evictable` 缓存条目大小之和；常驻模型与进行中的下载不计入。
+_Avoid_: Free space（磁盘剩余空间）、available space
+
 **Inference backend（推理后端）**：
 执行模型前向计算的引擎，如 candle、ONNX Runtime。
 _Avoid_: Model、engine（作为整体系统时）

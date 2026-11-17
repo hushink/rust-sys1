@@ -1,5 +1,5 @@
 use crate::body::read_body;
-use crate::cache::{CacheManager, CachedModel};
+use crate::cache::{CacheManager, CacheRemoveError, CachedModel};
 use crate::config::{BatchConfig, ServerConfig};
 use crate::error::{ApiError, map_model_error, map_registry_error};
 use crate::metrics::Metrics;
@@ -932,6 +932,12 @@ async fn admin_reload(
 #[derive(Serialize)]
 struct CacheList {
     cache_dir: String,
+    limit_bytes: Option<u64>,
+    used_bytes: u64,
+    free_bytes: Option<u64>,
+    reclaimable_bytes: u64,
+    model_count: usize,
+    resident_count: usize,
     models: Vec<CachedModel>,
 }
 
@@ -959,7 +965,9 @@ async fn admin_cache(
 
     match tokio::task::spawn_blocking(move || {
         let cache_dir = cache.root();
-        let result = cache.list();
+        let result = cache
+            .list()
+            .and_then(|models| cache.usage().map(|usage| (usage, models)));
         telemetry.on_cache(&CacheEvent {
             request_id: event_trace.request_id.clone(),
             trace_id: event_trace.trace_id.clone(),
@@ -972,9 +980,20 @@ async fn admin_cache(
     })
     .await
     {
-        Ok((cache_dir, Ok(models))) => {
-            json_response(StatusCode::OK, CacheList { cache_dir, models }, &request_id)
-        }
+        Ok((cache_dir, Ok((usage, models)))) => json_response(
+            StatusCode::OK,
+            CacheList {
+                cache_dir,
+                limit_bytes: usage.limit_bytes,
+                used_bytes: usage.used_bytes,
+                free_bytes: usage.free_bytes,
+                reclaimable_bytes: usage.reclaimable_bytes,
+                model_count: usage.model_count,
+                resident_count: usage.resident_count,
+                models,
+            },
+            &request_id,
+        ),
         Ok((_, Err(error))) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorResponse::bad_request(error),
@@ -1029,7 +1048,7 @@ async fn admin_cache_remove(
                     success: false,
                     error: Some(error.clone()),
                 });
-                return Err(error);
+                return Err(CacheRemoveError::other(error));
             }
         };
         if let Some(entry) = models.iter().find(|entry| entry.key == remove_key)
@@ -1047,7 +1066,7 @@ async fn admin_cache_remove(
                 success: false,
                 error: Some(message),
             });
-            return Ok::<_, String>((false, Some(entry.name.clone())));
+            return Ok::<_, CacheRemoveError>((false, Some(entry.name.clone())));
         }
         match cache.remove(&remove_key) {
             Ok(removed) => {
@@ -1068,7 +1087,7 @@ async fn admin_cache_remove(
                     key: Some(event_key),
                     action: CacheAction::Remove,
                     success: false,
-                    error: Some(error.clone()),
+                    error: Some(error.to_string()),
                 });
                 Err(error)
             }
@@ -1088,9 +1107,13 @@ async fn admin_cache_remove(
             CacheRemoveResult { key, removed },
             &request_id,
         ),
+        Ok(Err(CacheRemoveError::Conflict(message))) => {
+            let error = ApiError::conflict(message);
+            json_response(error.status, error.body, &request_id)
+        }
         Ok(Err(error)) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorResponse::bad_request(error),
+            ErrorResponse::bad_request(error.to_string()),
             &request_id,
         ),
         Err(error) => json_response(

@@ -1,7 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 use sys1_hub::Hub;
-use sys1_server::{CacheManager, CachedFile, CachedModel};
+use sys1_server::{CacheManager, CacheRemoveError, CacheUsage, CachedFile, CachedModel};
 
 /// Exposes the hub's on-disk model cache through the server admin API.
 pub struct HubCacheManager {
@@ -20,41 +21,58 @@ impl CacheManager for HubCacheManager {
     }
 
     fn list(&self) -> Result<Vec<CachedModel>, String> {
-        let models = self.hub.list_cached().map_err(|error| error.to_string())?;
-        Ok(models
+        let entries = self
+            .hub
+            .cache_entries()
+            .map_err(|error| error.to_string())?;
+        let mut models = entries
             .into_iter()
-            .map(|pulled| {
-                let key = pulled
-                    .directory
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default()
-                    .to_owned();
-                let files = pulled
-                    .manifest
+            .map(|entry| CachedModel {
+                key: entry.key,
+                name: entry.name,
+                directory: display_path(&entry.directory),
+                size_bytes: entry.size_bytes,
+                last_used_unix: entry
+                    .last_used
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_secs())
+                    .unwrap_or(0),
+                evictable: entry.evictable,
+                files: entry
                     .files
-                    .iter()
+                    .into_iter()
                     .map(|file| CachedFile {
-                        path: file.path.clone(),
+                        path: file.path,
                         size: file.size,
                     })
-                    .collect::<Vec<_>>();
-                let size_bytes = files.iter().map(|file| file.size).sum();
-                CachedModel {
-                    key,
-                    name: pulled.manifest.name,
-                    directory: display_path(&pulled.directory),
-                    size_bytes,
-                    files,
-                }
+                    .collect(),
             })
-            .collect())
+            .collect::<Vec<_>>();
+        models.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(models)
     }
 
-    fn remove(&self, key: &str) -> Result<bool, String> {
-        self.hub
-            .remove_cached(key)
-            .map_err(|error| error.to_string())
+    fn usage(&self) -> Result<CacheUsage, String> {
+        let usage = self.hub.cache_usage().map_err(|error| error.to_string())?;
+        Ok(CacheUsage {
+            limit_bytes: usage.limit_bytes,
+            used_bytes: usage.used_bytes,
+            free_bytes: usage.free_bytes,
+            reclaimable_bytes: usage.reclaimable_bytes,
+            model_count: usage.model_count,
+            resident_count: usage.resident_count,
+        })
+    }
+
+    fn remove(&self, key: &str) -> Result<bool, CacheRemoveError> {
+        match self.hub.remove_cached(key) {
+            Ok(removed) => Ok(removed),
+            Err(
+                error @ (sys1_hub::HubError::CacheBusy { .. }
+                | sys1_hub::HubError::CacheResident { .. }),
+            ) => Err(CacheRemoveError::conflict(error.to_string())),
+            Err(error) => Err(CacheRemoveError::other(error.to_string())),
+        }
     }
 }
 

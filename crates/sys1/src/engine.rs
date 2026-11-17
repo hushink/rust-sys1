@@ -5,7 +5,7 @@ use sys1_core::{
     DecisionOutput, Error as RegistryError, ManifestError, ModelError, ModelManifest,
     ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
 };
-use sys1_hub::{Hub, HubConfig, HubError, ModelRef};
+use sys1_hub::{CacheResidency, Hub, HubConfig, HubError, ModelRef};
 use sys1_laya::{
     LayaFactory as CheckpointFactory, is_model_directory, local_checkpoint_manifest,
     register_checkpoint_bundle,
@@ -70,9 +70,17 @@ pub enum EngineError {
 pub struct InferenceEngine {
     hub: Hub,
     factory: Arc<CheckpointFactory>,
-    registry: ModelRegistry,
+    registry: Arc<ModelRegistry>,
     options: ModelOptions,
     catalog_lock: Mutex<()>,
+}
+
+struct RegistryResidency(Arc<ModelRegistry>);
+
+impl CacheResidency for RegistryResidency {
+    fn is_resident(&self, model_name: &str) -> bool {
+        self.0.is_loaded(model_name)
+    }
 }
 
 impl InferenceEngine {
@@ -85,7 +93,8 @@ impl InferenceEngine {
         } = options;
         let hub = Hub::new(hub)?;
         let factory = Arc::new(CheckpointFactory::new());
-        let registry = ModelRegistry::new(Vec::new(), factory.clone(), registry)?;
+        let registry = Arc::new(ModelRegistry::new(Vec::new(), factory.clone(), registry)?);
+        hub.set_residency(Arc::new(RegistryResidency(registry.clone())));
         Ok(Self {
             hub,
             factory,

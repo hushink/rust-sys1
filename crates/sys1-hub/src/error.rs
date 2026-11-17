@@ -46,6 +46,19 @@ pub enum HubError {
     Offline(String),
     #[error("unsupported: {0}")]
     Unsupported(String),
+    #[error(
+        "cache quota exceeded: limit {limit} bytes, used {used} bytes, need {additional} more, reclaimable {reclaimable} bytes"
+    )]
+    CacheQuotaExceeded {
+        limit: u64,
+        used: u64,
+        additional: u64,
+        reclaimable: u64,
+    },
+    #[error("cache entry `{key}` is currently being downloaded or removed")]
+    CacheBusy { key: String },
+    #[error("model `{model}` is resident; unload it before removing cache entry `{key}`")]
+    CacheResident { key: String, model: String },
 }
 
 impl HubError {

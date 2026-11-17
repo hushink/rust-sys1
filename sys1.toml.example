@@ -6,6 +6,9 @@
 [hub]
 # Model download/cache directory.
 cache_dir = "D:/models/sys1-cache"
+# Maximum bytes kept under the model cache. Omit or use 0 for unlimited.
+# Before a pull, least-recently-used non-resident entries are evicted.
+# max_cache_bytes = 34359738368
 # offline = false
 # hf_endpoint = "https://huggingface.co"
 # modelscope_endpoint = "https://modelscope.cn"

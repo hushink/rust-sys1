@@ -16,9 +16,10 @@ use sys1_protocol::{
     SystemOneResponse, Usage,
 };
 use sys1_server::{
-    BatchConfig, BatchEvent, CacheEvent, CacheManager, CachedFile, CachedModel, ConfigEvent,
-    ConfigReload, ConfigReloader, ModelAction, ModelEvent, ReloadError, RequestEvent, ServerConfig,
-    ServerExtensions, Telemetry, router, router_with_extensions, router_with_resolver,
+    BatchConfig, BatchEvent, CacheEvent, CacheManager, CacheRemoveError, CacheUsage, CachedFile,
+    CachedModel, ConfigEvent, ConfigReload, ConfigReloader, ModelAction, ModelEvent, ReloadError,
+    RequestEvent, ServerConfig, ServerExtensions, Telemetry, router, router_with_extensions,
+    router_with_resolver,
 };
 use tower::ServiceExt;
 
@@ -200,7 +201,28 @@ impl CacheManager for FakeCache {
             .clone())
     }
 
-    fn remove(&self, key: &str) -> Result<bool, String> {
+    fn usage(&self) -> Result<CacheUsage, String> {
+        let models = self.list()?;
+        let used_bytes = models.iter().map(|model| model.size_bytes).sum();
+        let reclaimable_bytes = models
+            .iter()
+            .filter(|model| model.evictable)
+            .map(|model| model.size_bytes)
+            .sum();
+        Ok(CacheUsage {
+            limit_bytes: Some(100),
+            used_bytes,
+            free_bytes: Some(100_u64.saturating_sub(used_bytes)),
+            reclaimable_bytes,
+            model_count: models.len(),
+            resident_count: models.iter().filter(|model| !model.evictable).count(),
+        })
+    }
+
+    fn remove(&self, key: &str) -> Result<bool, CacheRemoveError> {
+        if key == "busy-key" {
+            return Err(CacheRemoveError::conflict("cache entry is busy"));
+        }
         let mut models = self
             .models
             .lock()
@@ -917,6 +939,8 @@ fn cached_model(key: &str, name: &str) -> CachedModel {
         name: name.to_owned(),
         directory: format!("fake-cache/models/{key}"),
         size_bytes: 42,
+        last_used_unix: 1_700_000_000,
+        evictable: true,
         files: vec![CachedFile {
             path: "model.bin".to_owned(),
             size: 42,
@@ -962,6 +986,14 @@ async fn admin_cache_lists_and_removes_entries() {
     assert_eq!(value["models"].as_array().unwrap().len(), 2);
     assert_eq!(value["models"][0]["key"], "key-a");
     assert_eq!(value["models"][0]["size_bytes"], 42);
+    assert_eq!(value["models"][0]["last_used_unix"], 1_700_000_000);
+    assert_eq!(value["models"][0]["evictable"], true);
+    assert_eq!(value["limit_bytes"], 100);
+    assert_eq!(value["used_bytes"], 84);
+    assert_eq!(value["free_bytes"], 16);
+    assert_eq!(value["reclaimable_bytes"], 84);
+    assert_eq!(value["model_count"], 2);
+    assert_eq!(value["resident_count"], 0);
 
     // A resident model cannot have its cache deleted underneath it.
     let (status, _, _) = send(app.clone(), post("/api/models/laya-test/load", "")).await;
@@ -985,6 +1017,14 @@ async fn admin_cache_lists_and_removes_entries() {
     assert_eq!(status, StatusCode::OK);
     let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
     assert_eq!(value["removed"], true);
+
+    let (status, _, body) = send(app.clone(), delete("/api/cache/busy-key")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        String::from_utf8_lossy(&body).contains("busy"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
 
     let (_, _, body) = send(app, get("/api/cache")).await;
     let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");

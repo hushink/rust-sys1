@@ -62,6 +62,25 @@ manifest，不下载文件。
 
 自定义中心实现 `ModelSource`，通过 `Hub::with_sources` 注入。
 
+## 缓存配额
+
+设置 `HubConfig::max_cache_bytes`（`None` 或 `0` 表示不限制）。在物化远程模型前，
+`Hub::pull` 会估算缺失字节，并按 LRU 淘汰非驻留缓存目录，直到新文件能够放入配额。
+
+- LRU 顺序使用 `model.json` 的修改时间；每次成功 pull（含缓存命中）都会刷新。
+- 通过 `Hub::set_residency` 安装 `CacheResidency`，保护进程内已加载的模型。
+  `InferenceEngine` 与 `sys1-cli` 会自动安装基于注册表的实现。
+- 进行中的 pull 与被拉取的条目不会被淘汰；下载期间 `remove` / `remove_cached`
+  返回 `HubError::CacheBusy`，常驻 provider 报告模型已加载时返回
+  `HubError::CacheResident`。
+- 模型本身大于配额，或空间被常驻条目占满时，返回
+  `HubError::CacheQuotaExceeded`，包含 `limit`、`used`、`additional`、
+  `reclaimable` 字节数。
+- `cache_entries()` 返回实际目录大小、时间戳与 `evictable`；`cache_usage()`
+  返回 `limit_bytes`、`used_bytes`、`free_bytes`、`reclaimable_bytes` 与计数。
+  `enforce_quota(additional)` 可在不 pull 的情况下单独执行策略。
+- `local:` 源不会复制进缓存，不占用配额。
+
 ## 测试
 
 ```bash
@@ -74,4 +93,5 @@ cargo test --offline -p sys1-hub
 - Hugging Face tree 分页（`Link` 头）、子目录、LFS sha256、revision/路径 URL
   编码、发布日期与 token 头；
 - ModelScope `Root`/`Recursive` 列表、token + cookie 头，以及 3000 条递归列表
-  截断后的目录拆分。
+  截断后的目录拆分；
+- LRU 配额淘汰、常驻模型保护、超大模型拒绝，以及 pull 触发的淘汰。

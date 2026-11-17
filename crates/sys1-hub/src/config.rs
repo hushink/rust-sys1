@@ -7,6 +7,9 @@ use std::time::Duration;
 pub struct HubConfig {
     pub cache_dir: PathBuf,
     pub offline: bool,
+    /// Maximum bytes kept under `<cache_dir>/models`. `None` or `Some(0)`
+    /// disables the quota.
+    pub max_cache_bytes: Option<u64>,
     pub hf_endpoint: String,
     pub modelscope_endpoint: String,
     pub hf_token: Option<String>,
@@ -20,6 +23,7 @@ impl HubConfig {
         Self {
             cache_dir: cache_dir.into(),
             offline: false,
+            max_cache_bytes: None,
             hf_endpoint: "https://huggingface.co".to_owned(),
             modelscope_endpoint: "https://modelscope.cn".to_owned(),
             hf_token: env_non_empty("HF_TOKEN"),
@@ -36,6 +40,11 @@ impl HubConfig {
     pub fn with_env(mut self) -> Self {
         if let Some(value) = env_non_empty("SYS1_CACHE") {
             self.cache_dir = PathBuf::from(value);
+        }
+        if let Some(value) =
+            env_non_empty("SYS1_MAX_CACHE_BYTES").and_then(|value| value.parse::<u64>().ok())
+        {
+            self.max_cache_bytes = (value > 0).then_some(value);
         }
         if let Some(value) = env_non_empty("HF_ENDPOINT") {
             self.hf_endpoint = trim_endpoint(&value);

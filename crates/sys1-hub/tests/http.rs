@@ -237,6 +237,58 @@ fn hub(cache: &Path) -> Hub {
 }
 
 #[test]
+fn pull_evicts_old_entries_to_fit_the_quota() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let cache = temp.path().join("cache");
+
+    let old_content = vec![1_u8; 2048];
+    let old_manifest = ModelManifest {
+        schema_version: 1,
+        name: "old-model".to_owned(),
+        description: "old cached model".to_owned(),
+        release_date: "2026-01-01".to_owned(),
+        family: "test".to_owned(),
+        variant: None,
+        backend: "fake".to_owned(),
+        format: "test".to_owned(),
+        version: "1.0.0".to_owned(),
+        aliases: Vec::new(),
+        files: vec![ModelFile {
+            path: "weights.bin".to_owned(),
+            url: String::new(),
+            sha256: Some(sha256(&old_content)),
+            git_sha1: None,
+            size: old_content.len() as u64,
+        }],
+    };
+    let old_dir = cache.join("models").join("old-model-key");
+    fs::create_dir_all(&old_dir).expect("old cache dir");
+    fs::write(old_dir.join("weights.bin"), &old_content).expect("old weights");
+    fs::write(
+        old_dir.join("model.json"),
+        serde_json::to_vec_pretty(&old_manifest).expect("old manifest"),
+    )
+    .expect("old manifest file");
+
+    let unlimited = hub(&cache);
+    let used = unlimited.cache_usage().expect("usage").used_bytes;
+    let mut config = HubConfig::new(&cache);
+    config.max_cache_bytes = Some(used);
+    let limited = Hub::new(config).expect("limited hub");
+
+    let content = b"new weights";
+    let server = TestServer::start(content, None);
+    let reference = format!("{}/model.json", server.base_url);
+    let pulled = limited.pull(&reference).expect("pull with quota");
+
+    assert!(!old_dir.exists(), "old entry should be evicted");
+    assert!(pulled.directory.is_dir());
+    let usage = limited.cache_usage().expect("usage");
+    assert!(usage.used_bytes <= used);
+    drop(limited);
+}
+
+#[test]
 fn pulls_a_static_http_manifest_and_file() {
     let content = b"static HTTP model center weights";
     let server = TestServer::start(content, None);

@@ -93,12 +93,16 @@ let app = router_with_extensions(
 - `GET /api/models` reports `origin: "configured" | "runtime"` per model.
 - `DELETE /api/models/{name}` also calls `ModelResolver::release`, allowing the
   resolver to forget local directory mappings.
-- `GET /api/cache` lists cached models (`key`, `name`, `directory`, `size_bytes`,
-  `files`). `DELETE /api/cache/{key}` removes the cache directory and its
-  manifest; a model that is currently resident returns `409` — unload it first.
-  Routes require `enable_admin` and a [`CacheManager`] injected through
-  `router_with_extensions` / `serve_with_extensions`. The CLI wires its hub as
-  the cache manager.
+- `GET /api/cache` returns `cache_dir`, `limit_bytes`, `used_bytes`,
+  `free_bytes`, `reclaimable_bytes`, `model_count`, `resident_count`, and the
+  `models` array. Each model has `key`, `name`, `directory`, `size_bytes`,
+  `last_used_unix`, `evictable`, and `files`. `DELETE /api/cache/{key}` removes
+  the cache directory and its manifest; a resident model or an active pull
+  returns `409` — unload the model or wait for the pull to finish. Routes require `enable_admin` and a
+  [`CacheManager`] injected through `router_with_extensions` /
+  `serve_with_extensions`. The trait's default `usage` derives totals from
+  `list`; quota-aware managers override it. The CLI wires its hub, including
+  the byte quota and LRU policy, as the cache manager.
 - `POST /api/config/reload` calls an injected [`ConfigReloader`]. The CLI
   re-reads its TOML and applies `[models]` additions/removals only; hub/server
   or existing-reference changes return `409 restart required`, failed parses or

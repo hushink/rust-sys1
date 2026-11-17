@@ -2712,6 +2712,7 @@ dependencies = [
  "sys1-core",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
  "url",
 ]
 

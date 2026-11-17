@@ -208,7 +208,7 @@ pub(crate) fn copy_local(
     Ok(())
 }
 
-fn partial_path(destination: &Path) -> PathBuf {
+pub(crate) fn partial_path(destination: &Path) -> PathBuf {
     let name = destination
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())

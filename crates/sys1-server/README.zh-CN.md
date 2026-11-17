@@ -91,11 +91,14 @@ let app = router_with_extensions(
 - `GET /api/models` 为每个模型输出 `origin: "configured" | "runtime"`。
 - `DELETE /api/models/{name}` 还会调用 `ModelResolver::release`，让 resolver
   清理本地目录映射。
-- `GET /api/cache` 列出缓存模型（`key`、`name`、`directory`、`size_bytes`、
-  `files`）。`DELETE /api/cache/{key}` 删除缓存目录与 manifest；正在常驻的模型
-  返回 `409`，需先 unload。路由要求 `enable_admin`，并通过
-  `router_with_extensions` / `serve_with_extensions` 注入 [`CacheManager`]；
-  CLI 用 hub 实现该接口。
+- `GET /api/cache` 返回 `cache_dir`、`limit_bytes`、`used_bytes`、`free_bytes`、
+  `reclaimable_bytes`、`model_count`、`resident_count` 与 `models` 数组。每个模型
+  包含 `key`、`name`、`directory`、`size_bytes`、`last_used_unix`、`evictable`
+  与 `files`。`DELETE /api/cache/{key}` 删除缓存目录与 manifest；正在常驻的模型
+  或进行中的下载返回 `409`，需先 unload 或等待下载完成。路由要求 `enable_admin`，并通过
+  `router_with_extensions` / `serve_with_extensions` 注入 [`CacheManager`]。
+  该 trait 的默认 `usage` 从 `list` 推导汇总；带配额的实现可覆盖。CLI 用 hub
+  （含字节配额与 LRU 策略）实现该接口。
 - `POST /api/config/reload` 调用注入的 [`ConfigReloader`]。CLI 会重读 TOML，
   只应用 `[models]` 新增/移除；hub/server 或已有模型引用变更返回
   `409 restart required`，解析或模型解析失败返回 `400`，两种情况都不修改目录。

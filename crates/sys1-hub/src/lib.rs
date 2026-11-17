@@ -17,7 +17,10 @@ pub use config::HubConfig;
 pub use error::HubError;
 pub use hf::HfSource;
 pub use http::HttpSource;
-pub use hub::{Hub, PulledModel};
+pub use hub::{
+    CacheEntry, CacheEviction, CacheFile, CacheResidency, CacheUsage, EvictedCacheEntry, Hub,
+    PulledModel,
+};
 pub use local::LocalSource;
 pub use modelscope::ModelScopeSource;
 pub use reference::ModelRef;

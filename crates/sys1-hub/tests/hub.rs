@@ -1,7 +1,11 @@
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use sys1_core::{ModelFile, ModelManifest};
-use sys1_hub::{Hub, HubConfig, HubError, ModelRef};
+use sys1_hub::{CacheResidency, Hub, HubConfig, HubError, ModelRef};
 
 fn sha256(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
@@ -158,4 +162,154 @@ fn local_pull_detects_hash_mismatch() {
     let reference = format!("local:{}", model_dir.display());
     let error = hub.pull(&reference).expect_err("hash mismatch must fail");
     assert!(matches!(error, HubError::HashMismatch { .. }));
+}
+
+fn cache_entry(cache: &Path, key: &str, name: &str, age: Duration) -> PathBuf {
+    let content = vec![0_u8; 1024];
+    let manifest = manifest(name, "weights.bin", &sha256(&content), 1024);
+    let directory = cache.join("models").join(key);
+    fs::create_dir_all(&directory).expect("cache entry dir");
+    fs::write(directory.join("weights.bin"), &content).expect("weights");
+    let manifest_path = directory.join("model.json");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).expect("manifest json"),
+    )
+    .expect("manifest");
+    let file = fs::File::options()
+        .write(true)
+        .open(&manifest_path)
+        .expect("open manifest");
+    file.set_modified(SystemTime::now() - age)
+        .expect("set manifest mtime");
+    directory
+}
+
+struct TestResidency(HashSet<String>);
+
+impl CacheResidency for TestResidency {
+    fn is_resident(&self, model_name: &str) -> bool {
+        self.0.contains(model_name)
+    }
+}
+
+#[test]
+fn quota_evicts_the_oldest_non_resident_entry() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let cache = temp.path().join("cache");
+    let resident = cache_entry(&cache, "key-a", "resident", Duration::from_secs(5));
+    let oldest = cache_entry(&cache, "key-b", "oldest", Duration::from_secs(3));
+    let newest = cache_entry(&cache, "key-c", "newest", Duration::from_secs(1));
+
+    let unlimited = Hub::new(HubConfig::new(&cache)).expect("hub");
+    let entries = unlimited.cache_entries().expect("entries");
+    let used = entries.iter().map(|entry| entry.size_bytes).sum::<u64>();
+    let oldest_size = entries
+        .iter()
+        .find(|entry| entry.key == "key-b")
+        .expect("oldest entry")
+        .size_bytes;
+    let limit = used - oldest_size;
+
+    let mut config = HubConfig::new(&cache);
+    config.max_cache_bytes = Some(limit);
+    let hub = Hub::new(config).expect("limited hub");
+    hub.set_residency(Arc::new(TestResidency(HashSet::from([
+        "resident".to_owned()
+    ]))));
+
+    let eviction = hub.enforce_quota(0).expect("eviction");
+    assert_eq!(eviction.entries.len(), 1);
+    assert_eq!(eviction.entries[0].key, "key-b");
+    assert_eq!(eviction.entries[0].name, "oldest");
+    assert_eq!(eviction.freed_bytes, oldest_size);
+    assert!(!oldest.exists());
+    assert!(resident.exists());
+    assert!(newest.exists());
+
+    let usage = hub.cache_usage().expect("usage");
+    assert_eq!(usage.limit_bytes, Some(limit));
+    assert!(usage.used_bytes <= limit);
+    assert_eq!(usage.free_bytes, Some(limit - usage.used_bytes));
+    assert_eq!(usage.reclaimable_bytes, newest_size(&hub));
+    assert_eq!(usage.model_count, 2);
+    assert_eq!(usage.resident_count, 1);
+}
+
+fn newest_size(hub: &Hub) -> u64 {
+    hub.cache_entries()
+        .expect("entries")
+        .into_iter()
+        .find(|entry| entry.key == "key-c")
+        .expect("newest entry")
+        .size_bytes
+}
+
+#[test]
+fn quota_rejects_an_entry_larger_than_the_limit() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let cache = temp.path().join("cache");
+    cache_entry(&cache, "key-a", "resident", Duration::from_secs(1));
+
+    let mut config = HubConfig::new(&cache);
+    config.max_cache_bytes = Some(1024);
+    let hub = Hub::new(config).expect("hub");
+    hub.set_residency(Arc::new(TestResidency(HashSet::from([
+        "resident".to_owned()
+    ]))));
+
+    let error = hub.enforce_quota(2048).expect_err("too large");
+    match error {
+        HubError::CacheQuotaExceeded {
+            limit,
+            additional,
+            reclaimable,
+            ..
+        } => {
+            assert_eq!(limit, 1024);
+            assert_eq!(additional, 2048);
+            assert_eq!(reclaimable, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+
+    let error = hub
+        .enforce_quota(0)
+        .expect_err("resident entry blocks shrinking");
+    assert!(matches!(
+        error,
+        HubError::CacheQuotaExceeded { reclaimable: 0, .. }
+    ));
+}
+
+#[test]
+fn remove_refuses_resident_entries() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let cache = temp.path().join("cache");
+    let directory = cache_entry(&cache, "key-a", "resident", Duration::from_secs(1));
+    let hub = Hub::new(HubConfig::new(&cache)).expect("hub");
+    hub.set_residency(Arc::new(TestResidency(HashSet::from([
+        "resident".to_owned()
+    ]))));
+
+    let error = hub.remove_cached("key-a").expect_err("resident entry");
+    assert!(matches!(
+        error,
+        HubError::CacheResident { ref model, .. } if model == "resident"
+    ));
+    assert!(directory.exists());
+}
+
+#[test]
+fn zero_quota_means_unlimited() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let cache = temp.path().join("cache");
+    cache_entry(&cache, "key-a", "model", Duration::from_secs(1));
+    let mut config = HubConfig::new(&cache);
+    config.max_cache_bytes = Some(0);
+    let hub = Hub::new(config).expect("hub");
+    let usage = hub.cache_usage().expect("usage");
+    assert_eq!(usage.limit_bytes, None);
+    assert!(usage.used_bytes > 0);
+    assert!(hub.enforce_quota(u64::MAX / 2).is_ok());
 }

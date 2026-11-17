@@ -44,6 +44,14 @@ use sys1_server::{
 struct Cli {
     #[arg(long, global = true, env = "SYS1_CACHE", value_name = "DIR")]
     cache: Option<PathBuf>,
+    /// Maximum bytes kept in the model cache (0 or unset = unlimited).
+    #[arg(
+        long,
+        global = true,
+        env = "SYS1_MAX_CACHE_BYTES",
+        value_name = "BYTES"
+    )]
+    max_cache_bytes: Option<u64>,
     /// Config file (default: ./sys1.toml when present).
     #[arg(long, global = true, env = "SYS1_CONFIG", value_name = "FILE")]
     config: Option<PathBuf>,
@@ -193,6 +201,7 @@ struct DoctorArgs {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let cache = cli.cache.clone();
+    let max_cache_bytes = cli.max_cache_bytes;
     let offline = cli.offline;
     let config = config::load(cli.config.as_deref())?;
     logging::init(
@@ -203,16 +212,18 @@ fn main() -> anyhow::Result<()> {
     )?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "sys1 starting");
     match cli.command {
-        Command::Serve(args) => serve_command(cache.as_deref(), offline, &config, args),
+        Command::Serve(args) => {
+            serve_command(cache.as_deref(), offline, max_cache_bytes, &config, args)
+        }
         Command::Pull(args) => {
-            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let hub = make_hub(cache.as_deref(), offline, max_cache_bytes, &config)?;
             let reference = config.model_reference(&args.reference);
             let pulled = pull_model(&hub, &reference)?;
             println!("{} -> {}", pulled.manifest.name, pulled.directory.display());
             Ok(())
         }
         Command::List => {
-            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let hub = make_hub(cache.as_deref(), offline, max_cache_bytes, &config)?;
             for model in hub.list_cached()? {
                 println!(
                     "{:<28} {:<10} {:<12} {}",
@@ -222,17 +233,33 @@ fn main() -> anyhow::Result<()> {
                     model.directory.display()
                 );
             }
+            let usage = hub.cache_usage()?;
+            println!(
+                "cache: {} used{}",
+                format_bytes(usage.used_bytes),
+                usage
+                    .limit_bytes
+                    .map(|limit| format!(
+                        " / {} ({} reclaimable)",
+                        format_bytes(limit),
+                        format_bytes(usage.reclaimable_bytes)
+                    ))
+                    .unwrap_or_else(|| format!(
+                        " (unlimited, {} reclaimable)",
+                        format_bytes(usage.reclaimable_bytes)
+                    ))
+            );
             Ok(())
         }
         Command::Show(args) => {
-            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let hub = make_hub(cache.as_deref(), offline, max_cache_bytes, &config)?;
             let reference = config.model_reference(&args.reference);
             let manifest = hub.resolve(&reference)?;
             println!("{}", serde_json::to_string_pretty(&manifest)?);
             Ok(())
         }
         Command::Rm(args) => {
-            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let hub = make_hub(cache.as_deref(), offline, max_cache_bytes, &config)?;
             let reference = config.model_reference(&args.reference);
             let location = hub.cache_location(&reference)?;
             if hub.remove(&reference)? {
@@ -242,14 +269,19 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::Run(args) => run_command(cache.as_deref(), offline, &config, args),
-        Command::Doctor(args) => doctor_command(cache.as_deref(), offline, &config, args),
+        Command::Run(args) => {
+            run_command(cache.as_deref(), offline, max_cache_bytes, &config, args)
+        }
+        Command::Doctor(args) => {
+            doctor_command(cache.as_deref(), offline, max_cache_bytes, &config, args)
+        }
     }
 }
 
 fn serve_command(
     cache: Option<&Path>,
     offline: bool,
+    max_cache_bytes: Option<u64>,
     config: &LoadedConfig,
     args: ServeArgs,
 ) -> anyhow::Result<()> {
@@ -299,7 +331,7 @@ fn serve_command(
     } else {
         server.metrics.unwrap_or(true)
     };
-    let hub = Arc::new(make_hub(cache, offline, config)?);
+    let hub = Arc::new(make_hub(cache, offline, max_cache_bytes, config)?);
     let (manifests, factory) = build_models(&hub, &specs, options.clone())?;
     if manifests.is_empty() {
         if !enable_admin {
@@ -312,18 +344,19 @@ fn serve_command(
             "starting with an empty catalog; add models with `POST /api/models` or `sys1 pull`"
         );
     }
+    let registry = Arc::new(ModelRegistry::new(
+        manifests,
+        factory.clone(),
+        RegistryConfig::default(),
+    )?);
+    hub.set_residency(Arc::new(RegistryResidency(registry.clone())));
     let resolver_impl = Arc::new(HubModelResolver::new(
         hub.clone(),
-        factory.clone(),
+        factory,
         options,
         config.value.models.clone(),
     ));
     let cache_manager: Arc<dyn sys1_server::CacheManager> = Arc::new(HubCacheManager::new(hub));
-    let registry = Arc::new(ModelRegistry::new(
-        manifests,
-        factory,
-        RegistryConfig::default(),
-    )?);
     let reloader: Option<Arc<dyn ConfigReloader>> = config.path.as_ref().map(|path| {
         let reloader: Arc<dyn ConfigReloader> = Arc::new(HubConfigReloader::new(
             path.clone(),
@@ -423,6 +456,7 @@ async fn shutdown_signal() {
 fn run_command(
     cache: Option<&Path>,
     offline: bool,
+    max_cache_bytes: Option<u64>,
     config: &LoadedConfig,
     args: RunArgs,
 ) -> anyhow::Result<()> {
@@ -447,7 +481,7 @@ fn run_command(
     let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
-    let hub = make_hub(cache, offline, config)?;
+    let hub = make_hub(cache, offline, max_cache_bytes, config)?;
     let options = make_model_options(
         &device,
         &dtype,
@@ -507,10 +541,11 @@ fn run_command(
 fn doctor_command(
     cache: Option<&Path>,
     offline: bool,
+    max_cache_bytes: Option<u64>,
     config: &LoadedConfig,
     args: DoctorArgs,
 ) -> anyhow::Result<()> {
-    let hub = make_hub(cache, offline, config)?;
+    let hub = make_hub(cache, offline, max_cache_bytes, config)?;
     let device = resolve_device(&args.device)?;
     let dtype = parse_dtype(&args.dtype)?;
     println!("rust-sys1 doctor");
@@ -539,6 +574,21 @@ fn doctor_command(
             .unwrap_or_else(|| "(defaults)".to_owned())
     );
     println!("  cache: {}", hub.config().cache_dir.display());
+    let usage = hub.cache_usage()?;
+    println!(
+        "  cache limit: {}",
+        usage
+            .limit_bytes
+            .map(format_bytes)
+            .unwrap_or_else(|| "unlimited".to_owned())
+    );
+    println!(
+        "  cache used: {} ({} reclaimable; {} models, {} resident)",
+        format_bytes(usage.used_bytes),
+        format_bytes(usage.reclaimable_bytes),
+        usage.model_count,
+        usage.resident_count
+    );
     println!("  hf endpoint: {}", hub.config().hf_endpoint);
     println!(
         "  modelscope endpoint: {}",
@@ -548,7 +598,34 @@ fn doctor_command(
     Ok(())
 }
 
-fn make_hub(cache: Option<&Path>, offline: bool, loaded: &LoadedConfig) -> anyhow::Result<Hub> {
+struct RegistryResidency(Arc<ModelRegistry>);
+
+impl sys1_hub::CacheResidency for RegistryResidency {
+    fn is_resident(&self, model_name: &str) -> bool {
+        self.0.is_loaded(model_name)
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
+
+fn make_hub(
+    cache: Option<&Path>,
+    offline: bool,
+    max_cache_bytes: Option<u64>,
+    loaded: &LoadedConfig,
+) -> anyhow::Result<Hub> {
     let hub = &loaded.value.hub;
     let mut config = HubConfig::from_env();
     // Precedence for paths/endpoints: CLI > environment > sys1.toml > defaults.
@@ -587,6 +664,13 @@ fn make_hub(cache: Option<&Path>, offline: bool, loaded: &LoadedConfig) -> anyho
         && let Some(secs) = hub.timeout_secs
     {
         config.timeout = Duration::from_secs(secs.max(1));
+    }
+    if let Some(limit) = max_cache_bytes {
+        config.max_cache_bytes = (limit > 0).then_some(limit);
+    } else if !env_set("SYS1_MAX_CACHE_BYTES")
+        && let Some(limit) = hub.max_cache_bytes
+    {
+        config.max_cache_bytes = (limit > 0).then_some(limit);
     }
     if hub.offline.unwrap_or(false) || offline {
         config.offline = true;

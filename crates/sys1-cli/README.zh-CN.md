@@ -81,6 +81,7 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --no-cors                  # 关闭 CORS 头
 --offline
 --cache <dir>              # 或 SYS1_CACHE
+--max-cache-bytes <bytes>  # 或 SYS1_MAX_CACHE_BYTES；0 = 不限制
 ```
 
 ## 模型管理 API
@@ -109,12 +110,29 @@ curl -X POST http://127.0.0.1:8080/api/models \
   -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 
-# 磁盘缓存：先列出 key，再按 key 删除；常驻模型需先 unload，否则返回 409。
+# 磁盘缓存：先列出 key，再按 key 删除；常驻模型或进行中的下载需先结束，否则返回 409。
 curl http://127.0.0.1:8080/api/cache
 curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 
 # 修改 sys1.toml 的 [models] 后：
 curl -X POST http://127.0.0.1:8080/api/config/reload
+```
+
+`GET /api/cache` 返回 `cache_dir`、`limit_bytes`、`used_bytes`、`free_bytes`、
+`reclaimable_bytes`、`model_count`、`resident_count` 与 `models` 数组。每个模型
+包含 `key`、`name`、`directory`、实际 `size_bytes`、`last_used_unix`、
+`evictable` 与 `files`。
+
+配置 `[hub] max_cache_bytes` 后，每次 pull 会先按 LRU 淘汰非驻留缓存条目，
+直到新文件能够放入配额。本进程内的常驻模型与进行中的下载受保护；
+`reclaimable_bytes` 表示当前可回收的空间。模型本身大于整个配额，或剩余空间被
+常驻条目占满时，返回 `cache quota exceeded`。缓存命中也会执行配额检查。
+`sys1 rm` 是显式删除，无法感知其他进程中的常驻模型；请先停止该进程或卸载模型。
+
+```bash
+# 删除一个缓存模型并查看当前用量
+sys1 rm laya-multilingual
+sys1 list
 ```
 
 添加引用时会通过 hub 物化模型（已缓存则直接使用），并立即对
@@ -154,6 +172,7 @@ CORS 默认 permissive；用 `--cors-origin`（可重复）、`--no-cors` 或
 ```toml
 [hub]
 cache_dir = "D:/models/sys1-cache"
+max_cache_bytes = 34359738368   # 省略或 0 = 不限制
 
 [server]
 device = "cuda:0"

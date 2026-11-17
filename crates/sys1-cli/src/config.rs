@@ -27,6 +27,8 @@ pub struct HubSection {
     /// Model download/cache directory. Relative paths resolve from the config file.
     #[serde(alias = "cache")]
     pub cache_dir: Option<PathBuf>,
+    /// Maximum bytes kept under the model cache. Omit or use `0` for unlimited.
+    pub max_cache_bytes: Option<u64>,
     pub offline: Option<bool>,
     pub hf_endpoint: Option<String>,
     pub modelscope_endpoint: Option<String>,
@@ -202,6 +204,7 @@ mod tests {
         let text = r#"
             [hub]
             cache_dir = "D:/models/sys1"
+            max_cache_bytes = 34359738368
 
             [server]
             bind = "0.0.0.0:8080"
@@ -219,6 +222,7 @@ mod tests {
             laya-latest = "local:D:/models/laya"
         "#;
         let config: FileConfig = toml::from_str(text).expect("config");
+        assert_eq!(config.hub.max_cache_bytes, Some(34_359_738_368));
         assert_eq!(config.server.batch_max, Some(64));
         assert_eq!(config.server.metrics, Some(false));
         assert_eq!(config.server.preload, vec!["laya-latest".to_owned()]);

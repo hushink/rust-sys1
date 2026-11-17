@@ -17,7 +17,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
 - Pure NumPy Laya-to-ONNX exporter with official golden logits within 2.5e-6.
 - Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
-- Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock.
+- Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock, byte quota with LRU eviction.
 - Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference.
 - Runtime model management: load, unload, reload, and add/remove models without restarting.
 - Observability: Prometheus/JSON metrics, replaceable telemetry, W3C `traceparent`, text/JSON/file logs.
@@ -233,6 +233,7 @@ when present. See [`sys1.toml.example`](sys1.toml.example).
 ```toml
 [hub]
 cache_dir = "D:/models/sys1-cache"  # model download/cache directory
+# max_cache_bytes = 34359738368    # omit or 0 = unlimited; LRU eviction before pull
 # hf_endpoint = "https://huggingface.co"
 # modelscope_endpoint = "https://modelscope.cn"
 
@@ -260,6 +261,15 @@ Relative paths in the file resolve from the config file's directory.
 `[models]` names are usable by `serve`, `run`, `pull`, `show`, and `rm`.
 Credentials are preferably supplied through `HF_TOKEN`,
 `MODELSCOPE_API_TOKEN`, and `SYS1_HUB_TOKEN`.
+
+With `[hub] max_cache_bytes` (or `--max-cache-bytes` /
+`SYS1_MAX_CACHE_BYTES`), each pull evicts the least-recently-used non-resident
+cache entries until the new files fit. Models resident in the serving process
+and active downloads are protected; a model larger than the quota fails with
+`cache quota exceeded`. `GET /api/cache` reports `limit_bytes`, `used_bytes`,
+`free_bytes`, and `reclaimable_bytes`, and `sys1 list` prints the same summary.
+`sys1 rm` remains an explicit deletion; stop other serving processes or unload
+their models first.
 
 ### Call the API
 
