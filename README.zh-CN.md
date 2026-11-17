@@ -126,6 +126,16 @@ curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 返回 key、名称、目录、大小与文件；`DELETE /api/cache/{key}` 删除缓存目录与
 manifest。当前常驻的模型返回 `409`，需要先 unload。
 
+修改 `sys1.toml` 的 `[models]` 后，可不重启应用安全的增删：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/config/reload
+```
+
+只应用 `[models]` 变更。`[hub]`/`[server]` 设置或已有模型引用变化返回
+`409 restart required`；TOML 无效或模型解析失败返回 `400`。两种情况都不修改
+目录；由配置新增的模型标记为 `origin: "configured"`。
+
 ### 指标与预加载
 
 ```bash

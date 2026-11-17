@@ -182,6 +182,13 @@ impl ModelRegistry {
             .insert(manifest, ModelOrigin::Runtime)
     }
 
+    /// Add a model that came from configuration (for example a config reload)
+    /// so it is reported as [`ModelOrigin::Configured`].
+    pub fn register_configured(&self, manifest: ModelManifest) -> Result<(), ManifestError> {
+        self.lock_catalog_mut()
+            .insert(manifest, ModelOrigin::Configured)
+    }
+
     /// Whether a catalog entry came from startup configuration or a runtime
     /// `register` call. Aliases resolve to their canonical entry.
     pub fn origin(&self, name: &str) -> Option<ModelOrigin> {

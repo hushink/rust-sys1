@@ -3,9 +3,10 @@ use crate::cache::{CacheManager, CachedModel};
 use crate::config::{BatchConfig, ServerConfig};
 use crate::error::{ApiError, map_model_error, map_registry_error};
 use crate::metrics::Metrics;
+use crate::reload::{ConfigReloader, ReloadError};
 use crate::telemetry::{
-    BatchEvent, CacheAction, CacheEvent, ModelAction, ModelEvent, NoopTelemetry, RequestEvent,
-    TRACEPARENT_HEADER, Telemetry, TraceContext,
+    BatchEvent, CacheAction, CacheEvent, ConfigEvent, ModelAction, ModelEvent, NoopTelemetry,
+    RequestEvent, TRACEPARENT_HEADER, Telemetry, TraceContext,
 };
 use axum::Json;
 use axum::Router;
@@ -48,6 +49,7 @@ pub struct AppState {
     pub config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
     cache: Option<Arc<dyn CacheManager>>,
+    reload: Option<Arc<dyn ConfigReloader>>,
     /// Serializes catalog mutations so add/remove snapshots cannot interleave.
     admin_lock: Arc<tokio::sync::Mutex<()>>,
     metrics: Arc<Metrics>,
@@ -62,6 +64,8 @@ pub struct ServerExtensions {
     pub resolver: Option<Arc<dyn ModelResolver>>,
     /// Enables `/api/cache` disk-cache management.
     pub cache: Option<Arc<dyn CacheManager>>,
+    /// Enables safe incremental `POST /api/config/reload`.
+    pub reload: Option<Arc<dyn ConfigReloader>>,
     /// Structured request/model/batch/cache events. Defaults to a no-op.
     pub telemetry: Option<Arc<dyn Telemetry>>,
 }
@@ -97,6 +101,7 @@ pub fn router_with_extensions(
     let ServerExtensions {
         resolver,
         cache,
+        reload,
         telemetry,
     } = extensions;
     let telemetry = telemetry.unwrap_or_else(|| Arc::new(NoopTelemetry));
@@ -129,6 +134,9 @@ pub fn router_with_extensions(
                 .route("/api/cache", get(admin_cache))
                 .route("/api/cache/{key}", delete(admin_cache_remove));
         }
+        if reload.is_some() {
+            app = app.route("/api/config/reload", post(admin_reload_config));
+        }
     }
     if config.enable_metrics {
         app = app
@@ -144,6 +152,7 @@ pub fn router_with_extensions(
             config,
             resolver,
             cache,
+            reload,
             admin_lock: Arc::new(tokio::sync::Mutex::new(())),
             metrics,
             telemetry,
@@ -1030,6 +1039,79 @@ fn valid_cache_key(key: &str) -> bool {
         && key
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+async fn admin_reload_config(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Extension(trace): Extension<TraceContext>,
+) -> Response {
+    let request_id = trace.request_id.clone();
+    if let Err(error) = check_auth(&state.config, &headers) {
+        return json_response(error.status, error.body, &request_id);
+    }
+    let Some(reloader) = state.reload.clone() else {
+        let error = ApiError::not_implemented("config reload is not configured");
+        return json_response(error.status, error.body, &request_id);
+    };
+
+    let admin_lock = state.admin_lock.clone();
+    let _admin_guard = admin_lock.lock().await;
+    let telemetry = state.telemetry.clone();
+    let event_trace = trace.clone();
+    let result = tokio::task::spawn_blocking(move || reloader.reload()).await;
+
+    match result {
+        Ok(Ok(report)) => {
+            telemetry.on_config(&ConfigEvent {
+                request_id: event_trace.request_id.clone(),
+                trace_id: event_trace.trace_id.clone(),
+                success: true,
+                added: report.added.clone(),
+                removed: report.removed.clone(),
+                error: None,
+            });
+            json_response(StatusCode::OK, report, &request_id)
+        }
+        Ok(Err(ReloadError::RestartRequired(changes))) => {
+            let message = format!("restart required: {}", changes.join("; "));
+            telemetry.on_config(&ConfigEvent {
+                request_id: event_trace.request_id.clone(),
+                trace_id: event_trace.trace_id.clone(),
+                success: false,
+                added: Vec::new(),
+                removed: Vec::new(),
+                error: Some(message.clone()),
+            });
+            let error = ApiError::conflict(message);
+            json_response(error.status, error.body, &request_id)
+        }
+        Ok(Err(ReloadError::Failed(message))) => {
+            telemetry.on_config(&ConfigEvent {
+                request_id: event_trace.request_id.clone(),
+                trace_id: event_trace.trace_id.clone(),
+                success: false,
+                added: Vec::new(),
+                removed: Vec::new(),
+                error: Some(message.clone()),
+            });
+            let error = ApiError::bad_request(message);
+            json_response(error.status, error.body, &request_id)
+        }
+        Err(error) => {
+            let message = format!("config reload task failed: {error}");
+            telemetry.on_config(&ConfigEvent {
+                request_id: event_trace.request_id.clone(),
+                trace_id: event_trace.trace_id.clone(),
+                success: false,
+                added: Vec::new(),
+                removed: Vec::new(),
+                error: Some(message.clone()),
+            });
+            let error = ApiError::internal(message);
+            json_response(error.status, error.body, &request_id)
+        }
+    }
 }
 
 async fn admin_add_model(State(state): State<AppState>, request: Request) -> Response {

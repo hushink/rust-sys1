@@ -39,6 +39,8 @@ cache_dir = "D:/models/sys1-cache"
 # Serving model catalog. Keys are the names clients pass to /v1/systemone.
 # Values are ModelRefs: local:/path, hf:owner/repo, modelscope:..., or a
 # manifest URL. The same names work with `sys1 run`, `pull`, `show`, and `rm`.
+# `POST /api/config/reload` applies [models] additions/removals; other changes
+# require a restart.
 [models]
 laya-latest = "local:D:/models/laya"
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"

@@ -101,6 +101,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - `/v1/*` 不输出 Laya 私有字段；扩展字段放到 `/api/*` 或响应头（后续）。
 - 运行时模型管理：`/api/models` 提供目录/常驻状态、`load`/`unload`/`reload`、按引用添加与删除；`GET /api/models` 标记 `configured`/`runtime`，`POST /api/models` 可用 `"load": true` 添加并加载（失败回滚）。与 `/v1/*` 共用 Bearer，库内默认关闭（`ServerConfig::enable_admin`），`sys1 serve` 默认开启并可用 `--no-admin` 关闭。运行时增删不持久化，重启后以配置 manifest 为准。细节见 ADR 0008。
 - 磁盘缓存管理：`GET /api/cache` / `DELETE /api/cache/{key}` 在服务进程内列出/删除模型缓存；`sys1-server` 通过 `CacheManager` trait 注入（CLI 用 hub 实现），不依赖 `sys1-hub`；常驻模型返回 409，需先 unload。
+- 配置热加载：`POST /api/config/reload` 通过 `ConfigReloader` 注入；CLI 只应用 `[models]` 新增/移除，新增模型标记 `configured`。`[hub]`/`[server]` 或已有模型引用变化返回 409，解析/解析模型失败返回 400，均不修改目录。细节见 ADR 0011。
 - 可观测性：`/metrics`（Prometheus 文本）与 `/api/metrics`（JSON）记录 systemone 请求/错误/延迟、batch 大小与耗时、模型加载/卸载/失败、按模型请求数、常驻模型数与 uptime；`ServerConfig::enable_metrics` 库内默认关闭，CLI 默认开启。端点与 `/v1/*` 共用 Bearer。
 - 预加载：`[server] preload` / `--preload` 在监听端口前调用注册表 `acquire`，避免首请求冷加载；失败带模型名终止启动。
 - 可替换日志/telemetry：`sys1-server` 不安装全局 subscriber，只发 `tracing` span/事件；通过 `ServerExtensions.telemetry` 注入 `Telemetry`（`RequestEvent`/`ModelEvent`/`BatchEvent`/`CacheEvent`），默认 `NoopTelemetry`，CLI 使用 `TracingTelemetry`。CLI 支持 text/JSON、文件追加与级别过滤（CLI/`SYS1_LOG_*` > `RUST_LOG` > `[server] log_*`）。
@@ -185,6 +186,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - `[server] preload` / `--preload NAME` 在 serve 前加载模型，失败则启动失败。
 - admin 开启时，CLI 额外提供 `/api/cache`（列出 key/大小/文件）与 `DELETE /api/cache/{key}`，与 `sys1 list`/`rm` 对齐。
 - 日志：`--log-level`、`--log-format text|json`、`--log-file`，或 `SYS1_LOG_*` / `[server] log_*`；库不安装 subscriber，CLI 负责初始化。
+- 热加载：`POST /api/config/reload` 重读 TOML；仅 `[models]` 增删可应用，其他变更提示重启。
 - 二进制名暂定 `sys1`。
 
 ## 9. 验收
@@ -216,6 +218,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 服务进程内磁盘缓存管理已实现：`GET /api/cache` 与 `DELETE /api/cache/{key}`；`Hub::remove_cached` 校验 cache key 防止路径穿越，常驻模型拒绝删除。
 - Engine 开销基准（CPU F32 multilingual，30 次交替）：直接推理 121.7 ms 均值、engine 122.6 ms，约 0.9 ms（<1%）；无需进一步优化 manifest 克隆。
 - 可替换 telemetry 与 trace context 已实现：`Telemetry` 事件、`TracingTelemetry`、`ServerExtensions` 注入、`traceparent` 响应头；CLI text/JSON/文件日志。测试覆盖自定义 telemetry、trace id 透传、batch 事件与 JSON 日志文件。
+- 配置热加载已实现：CLI 只应用 `[models]` 增删，新增项标记 `configured`；server 设置/引用变化 409，解析失败 400 且不改目录。真实进程验证 add 92 ms、remove、restart-required 409。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
 - 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。
@@ -272,3 +275,4 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 | Q34 | 运行时模型管理：可变目录 + 可选 resolver + `/api/models` 管理端点；不持久化，配置为准 |
 | Q35 | 高层 `InferenceEngine` 放 umbrella；Laya 前缀 API 只留在 `sys1-laya`，其他 crate 用通用命名 |
 | Q36 | 可替换 telemetry：库只发事件、CLI 装 subscriber；W3C traceparent 贯穿请求、模型与缓存审计 |
+| Q37 | 配置热加载只做 `[models]` 安全增删；其他设置与已有引用变更要求重启 |

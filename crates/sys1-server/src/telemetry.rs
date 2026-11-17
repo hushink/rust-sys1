@@ -160,6 +160,17 @@ pub struct CacheEvent {
     pub error: Option<String>,
 }
 
+/// A config reload attempt.
+#[derive(Clone, Debug)]
+pub struct ConfigEvent {
+    pub request_id: String,
+    pub trace_id: String,
+    pub success: bool,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub error: Option<String>,
+}
+
 /// Replaceable structured event sink.
 ///
 /// The server only emits events; it never installs a `tracing` subscriber.
@@ -172,6 +183,7 @@ pub trait Telemetry: Send + Sync {
     fn on_model(&self, _event: &ModelEvent) {}
     fn on_batch(&self, _event: &BatchEvent) {}
     fn on_cache(&self, _event: &CacheEvent) {}
+    fn on_config(&self, _event: &ConfigEvent) {}
 }
 
 #[derive(Default)]
@@ -243,6 +255,19 @@ impl Telemetry for TracingTelemetry {
             success = event.success,
             error = event.error.as_deref().unwrap_or(""),
             "cache event"
+        );
+    }
+
+    fn on_config(&self, event: &ConfigEvent) {
+        tracing::info!(
+            target: "sys1.telemetry",
+            request_id = %event.request_id,
+            trace_id = %event.trace_id,
+            success = event.success,
+            added = ?event.added,
+            removed = ?event.removed,
+            error = event.error.as_deref().unwrap_or(""),
+            "config reload"
         );
     }
 }

@@ -53,7 +53,8 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `max_loaded` 会淘汰最老且没有外部 `Arc` 持有的模型。
 - `keep_alive` 在 `maintenance()` / `predict()` 时清理空闲模型。
 - 正在使用的模型可能临时超过 `max_loaded`。
-- `register(manifest)` 添加目录项；重名和别名冲突会被拒绝，目录保持不变。
+- `register(manifest)` 以 `ModelOrigin::Runtime` 添加目录项；
+  `register_configured` 标记配置来源。重名和别名冲突会被拒绝，目录保持不变。
   `unregister(name)` 按名称或别名移除目录项并丢弃常驻实例。
 - `is_loaded(name)` 查询常驻状态，不刷新 LRU 时间。
 - `origin(name)` 返回 `ModelOrigin::Configured`（传给 `new` 的 manifest）或

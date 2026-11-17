@@ -1,6 +1,6 @@
 use crate::pull_model;
 use indexmap::IndexMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use sys1_core::{ModelError, ModelManifest, ModelResolver};
 use sys1_hub::Hub;
 use sys1_laya::{
@@ -14,8 +14,8 @@ pub struct HubModelResolver {
     factory: Arc<CheckpointFactory>,
     options: ModelOptions,
     /// `[models]` aliases from `sys1.toml`, so the admin API can accept the
-    /// same names as the CLI.
-    references: IndexMap<String, String>,
+    /// same names as the CLI. Replaced atomically on config reload.
+    references: RwLock<IndexMap<String, String>>,
 }
 
 impl HubModelResolver {
@@ -29,19 +29,30 @@ impl HubModelResolver {
             hub,
             factory,
             options,
-            references,
+            references: RwLock::new(references),
         }
     }
-}
 
-impl ModelResolver for HubModelResolver {
-    fn resolve(&self, reference: &str) -> Result<Vec<ModelManifest>, ModelError> {
+    pub fn replace_references(&self, references: IndexMap<String, String>) {
+        *self
+            .references
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = references;
+    }
+
+    fn resolve_named(
+        &self,
+        reference: &str,
+        name: Option<&str>,
+    ) -> Result<Vec<ModelManifest>, ModelError> {
         let reference = self
             .references
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(reference)
-            .map(String::as_str)
-            .unwrap_or(reference);
-        let pulled = pull_model(self.hub.as_ref(), reference).map_err(|error| {
+            .cloned()
+            .unwrap_or_else(|| reference.to_owned());
+        let pulled = pull_model(self.hub.as_ref(), &reference).map_err(|error| {
             ModelError::load(format!("cannot resolve `{reference}`: {error:#}"))
         })?;
         register_checkpoint_bundle(
@@ -49,8 +60,18 @@ impl ModelResolver for HubModelResolver {
             &pulled.manifest,
             &pulled.directory,
             self.options.clone(),
-            None,
+            name,
         )
+    }
+}
+
+impl ModelResolver for HubModelResolver {
+    fn resolve(&self, reference: &str) -> Result<Vec<ModelManifest>, ModelError> {
+        self.resolve_named(reference, None)
+    }
+
+    fn resolve_as(&self, name: &str, reference: &str) -> Result<Vec<ModelManifest>, ModelError> {
+        self.resolve_named(reference, Some(name))
     }
 
     fn release(&self, name: &str) -> bool {
@@ -98,6 +119,14 @@ mod tests {
         assert!(resolver.release("checkpoint"));
         assert!(factory.registered().is_empty());
         assert!(!resolver.release("checkpoint"));
+
+        let manifests = resolver
+            .resolve_as("custom-name", "configured")
+            .expect("resolve with name override");
+        assert_eq!(manifests[0].name, "custom-name");
+        assert_eq!(factory.registered(), vec!["custom-name"]);
+        assert!(resolver.release("custom-name"));
+        resolver.replace_references(IndexMap::new());
 
         fs::remove_dir_all(root).expect("cleanup");
     }

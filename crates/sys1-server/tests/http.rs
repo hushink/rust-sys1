@@ -16,9 +16,9 @@ use sys1_protocol::{
     SystemOneResponse, Usage,
 };
 use sys1_server::{
-    BatchConfig, BatchEvent, CacheEvent, CacheManager, CachedFile, CachedModel, ModelAction,
-    ModelEvent, RequestEvent, ServerConfig, ServerExtensions, Telemetry, router,
-    router_with_extensions, router_with_resolver,
+    BatchConfig, BatchEvent, CacheEvent, CacheManager, CachedFile, CachedModel, ConfigEvent,
+    ConfigReload, ConfigReloader, ModelAction, ModelEvent, ReloadError, RequestEvent, ServerConfig,
+    ServerExtensions, Telemetry, router, router_with_extensions, router_with_resolver,
 };
 use tower::ServiceExt;
 
@@ -173,6 +173,16 @@ fn app_with_resolver(config: ServerConfig, resolver: Option<Arc<dyn ModelResolve
     router_with_resolver(Arc::new(registry), config, resolver)
 }
 
+fn app_with_extensions(config: ServerConfig, extensions: ServerExtensions) -> Router {
+    let registry = ModelRegistry::new(
+        vec![manifest("laya-test", &["laya-latest"])],
+        Arc::new(FakeFactory),
+        RegistryConfig::default(),
+    )
+    .expect("registry");
+    router_with_extensions(Arc::new(registry), config, extensions)
+}
+
 struct FakeCache {
     models: Mutex<Vec<CachedModel>>,
 }
@@ -207,6 +217,7 @@ struct RecordingTelemetry {
     models: Mutex<Vec<ModelEvent>>,
     batches: Mutex<Vec<BatchEvent>>,
     caches: Mutex<Vec<CacheEvent>>,
+    configs: Mutex<Vec<ConfigEvent>>,
 }
 
 impl Telemetry for RecordingTelemetry {
@@ -236,6 +247,44 @@ impl Telemetry for RecordingTelemetry {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(event.clone());
+    }
+
+    fn on_config(&self, event: &ConfigEvent) {
+        self.configs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(event.clone());
+    }
+}
+
+struct OkReloader;
+
+impl ConfigReloader for OkReloader {
+    fn reload(&self) -> Result<ConfigReload, ReloadError> {
+        Ok(ConfigReload {
+            config_path: Some("fake.toml".to_owned()),
+            added: vec!["added-model".to_owned()],
+            removed: Vec::new(),
+            unchanged: vec!["laya-test".to_owned()],
+        })
+    }
+}
+
+struct RestartReloader;
+
+impl ConfigReloader for RestartReloader {
+    fn reload(&self) -> Result<ConfigReload, ReloadError> {
+        Err(ReloadError::RestartRequired(vec![
+            "server settings changed".to_owned(),
+        ]))
+    }
+}
+
+struct FailedReloader;
+
+impl ConfigReloader for FailedReloader {
+    fn reload(&self) -> Result<ConfigReload, ReloadError> {
+        Err(ReloadError::Failed("bad config".to_owned()))
     }
 }
 
@@ -1134,6 +1183,109 @@ async fn telemetry_and_trace_context_are_replaceable() {
             && event.success
             && event.trace_id == trace_id
     }));
+}
+
+#[tokio::test]
+async fn config_reload_is_admin_protected_and_reports_changes() {
+    let telemetry = Arc::new(RecordingTelemetry::default());
+    let app = app_with_extensions(
+        ServerConfig {
+            api_key: Some("secret".to_owned()),
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        ServerExtensions {
+            reload: Some(Arc::new(OkReloader)),
+            telemetry: Some(telemetry.clone()),
+            ..ServerExtensions::default()
+        },
+    );
+
+    let (status, _, _) = send(app.clone(), post("/api/config/reload", "")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/config/reload")
+        .header(header::AUTHORIZATION, "Bearer secret")
+        .body(Body::empty())
+        .expect("request");
+    let (status, _, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["config_path"], "fake.toml");
+    assert_eq!(value["added"][0], "added-model");
+    assert_eq!(value["unchanged"][0], "laya-test");
+
+    let events = telemetry
+        .configs
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert_eq!(events.len(), 1);
+    assert!(events[0].success);
+    assert_eq!(events[0].added, vec!["added-model".to_owned()]);
+}
+
+#[tokio::test]
+async fn config_reload_reports_restart_required() {
+    let app = app_with_extensions(
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        ServerExtensions {
+            reload: Some(Arc::new(RestartReloader)),
+            ..ServerExtensions::default()
+        },
+    );
+    let (status, _, body) = send(app, post("/api/config/reload", "")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        String::from_utf8_lossy(&body).contains("restart required"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[tokio::test]
+async fn config_reload_failure_is_bad_request() {
+    let app = app_with_extensions(
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        ServerExtensions {
+            reload: Some(Arc::new(FailedReloader)),
+            ..ServerExtensions::default()
+        },
+    );
+    let (status, _, body) = send(app, post("/api/config/reload", "")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        String::from_utf8_lossy(&body).contains("bad config"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[tokio::test]
+async fn config_reload_requires_admin_and_a_reloader() {
+    let (status, _, _) = send(app(ServerConfig::default()), post("/api/config/reload", "")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let app = app_with_extensions(
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        ServerExtensions::default(),
+    );
+    let (status, _, _) = send(app, post("/api/config/reload", "")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

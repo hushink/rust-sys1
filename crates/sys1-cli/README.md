@@ -81,6 +81,7 @@ catalog changes. It is enabled by default and uses the same Bearer key as
 | `DELETE` | `/api/models/{name}` | Unload and remove it from the live catalog |
 | `GET` | `/api/cache` | List cached models, keys, sizes, and files |
 | `DELETE` | `/api/cache/{key}` | Remove a cache entry from disk |
+| `POST` | `/api/config/reload` | Re-read `sys1.toml` and apply safe model changes |
 
 ```bash
 curl http://127.0.0.1:8080/api/models
@@ -94,6 +95,9 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 # unloaded first (409 otherwise).
 curl http://127.0.0.1:8080/api/cache
 curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
+
+# After editing [models] in sys1.toml:
+curl -X POST http://127.0.0.1:8080/api/config/reload
 ```
 
 Adding a reference materializes it through the hub (unless cached) and makes it
@@ -114,6 +118,19 @@ Bearer key as `/v1/*` when configured. The JSON includes request/error/latency
 counters, batch size/latency, model load/unload counts, per-model request counts,
 and currently resident models. Preloaded models are already resident when the
 HTTP metrics start, so they do not increment `model load` counters.
+
+## Config reload
+
+`POST /api/config/reload` reloads the TOML file passed with `--config` (or the
+auto-loaded `sys1.toml`). It applies **only** `[models]` additions/removals:
+
+- Added models are resolved through the hub and registered as `configured`.
+- Removed models are unloaded from the catalog (the disk cache is left alone).
+- Changing `[hub]`, `[server]`, or an existing model's reference returns
+  `409 restart required`; invalid TOML or model resolution failure returns
+  `400`. Neither mutates the catalog.
+- The endpoint exists only when admin endpoints are enabled and a config file
+  was loaded at startup.
 
 ## Configuration
 

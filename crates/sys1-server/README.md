@@ -19,6 +19,7 @@ Strict TypeSafe-compatible System One HTTP server built on axum.
 | `DELETE` | `/api/models/{name}` | Unload and remove from the live catalog |
 | `GET` | `/api/cache` | List the on-disk model cache (needs a cache manager) |
 | `DELETE` | `/api/cache/{key}` | Remove one cache entry |
+| `POST` | `/api/config/reload` | Apply safe config changes (needs a reloader) |
 | `GET` | `/metrics` | Prometheus metrics (when enabled) |
 | `GET` | `/api/metrics` | JSON metrics snapshot (when enabled) |
 
@@ -98,6 +99,11 @@ let app = router_with_extensions(
   Routes require `enable_admin` and a [`CacheManager`] injected through
   `router_with_extensions` / `serve_with_extensions`. The CLI wires its hub as
   the cache manager.
+- `POST /api/config/reload` calls an injected [`ConfigReloader`]. The CLI
+  re-reads its TOML and applies `[models]` additions/removals only; hub/server
+  or existing-reference changes return `409 restart required`, failed parses or
+  resolution return `400`, and neither case mutates the catalog. Config-added
+  models are reported with `origin: "configured"`.
 - Without a resolver, `POST /api/models` returns `501`; load/unload/reload and
   DELETE still work for configured models.
 - Admin requests use the same Bearer key as `/v1/*`. With no key configured the

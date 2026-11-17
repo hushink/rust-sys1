@@ -56,6 +56,14 @@ pub trait ModelFactory: Send + Sync {
 pub trait ModelResolver: Send + Sync {
     fn resolve(&self, reference: &str) -> Result<Vec<ModelManifest>, ModelError>;
 
+    /// Resolve and register under an explicit catalog name. The default
+    /// ignores the name; sources with a name-override facility should
+    /// override it.
+    fn resolve_as(&self, name: &str, reference: &str) -> Result<Vec<ModelManifest>, ModelError> {
+        let _ = name;
+        self.resolve(reference)
+    }
+
     /// Forget resolver-side state (downloads, directory registrations) for a
     /// model that was removed from the catalog.
     fn release(&self, name: &str) -> bool {

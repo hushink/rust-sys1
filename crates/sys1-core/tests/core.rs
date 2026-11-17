@@ -247,6 +247,11 @@ fn runtime_registration_and_removal() {
         .expect("register b");
     assert_eq!(registry.resolve("alias-b").expect("resolve alias").0, "b");
     assert_eq!(registry.origin("alias-b"), Some(ModelOrigin::Runtime));
+    registry
+        .register_configured(manifest("c", &["alias-c"]))
+        .expect("register configured c");
+    assert_eq!(registry.origin("alias-c"), Some(ModelOrigin::Configured));
+    registry.unregister("c");
     assert_eq!(registry.manifests().len(), 2);
 
     let _ = registry.acquire("b").expect("load b");

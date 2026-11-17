@@ -1,6 +1,7 @@
 mod cache;
 mod config;
 mod logging;
+mod reload;
 mod source;
 
 use anyhow::{Context, bail};
@@ -9,6 +10,7 @@ use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
 use config::LoadedConfig;
 use indexmap::IndexMap;
+use reload::HubConfigReloader;
 use source::HubModelResolver;
 use std::collections::HashSet;
 use std::fs;
@@ -29,7 +31,8 @@ use sys1_laya::{
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{
-    BatchConfig, ServerConfig, ServerExtensions, TracingTelemetry, serve_with_extensions,
+    BatchConfig, ConfigReloader, ServerConfig, ServerExtensions, TracingTelemetry,
+    serve_with_extensions,
 };
 
 #[derive(Parser)]
@@ -303,7 +306,7 @@ fn serve_command(
             "starting with an empty catalog; add models with `POST /api/models` or `sys1 pull`"
         );
     }
-    let resolver: Arc<dyn ModelResolver> = Arc::new(HubModelResolver::new(
+    let resolver_impl = Arc::new(HubModelResolver::new(
         hub.clone(),
         factory.clone(),
         options,
@@ -315,6 +318,16 @@ fn serve_command(
         factory,
         RegistryConfig::default(),
     )?);
+    let reloader: Option<Arc<dyn ConfigReloader>> = config.path.as_ref().map(|path| {
+        let reloader: Arc<dyn ConfigReloader> = Arc::new(HubConfigReloader::new(
+            path.clone(),
+            resolver_impl.clone(),
+            registry.clone(),
+            config.value.clone(),
+        ));
+        reloader
+    });
+    let resolver: Arc<dyn ModelResolver> = resolver_impl;
 
     let preload = if args.preload.is_empty() {
         server.preload.clone()
@@ -366,6 +379,7 @@ fn serve_command(
         ServerExtensions {
             resolver: Some(resolver),
             cache: Some(cache_manager),
+            reload: reloader,
             telemetry: Some(Arc::new(TracingTelemetry)),
         },
     ))?;

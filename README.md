@@ -133,6 +133,18 @@ The cache admin API mirrors `sys1 list` / `sys1 rm` inside the serving process:
 `DELETE /api/cache/{key}` removes the cache directory and manifest. A model that
 is currently resident returns `409`, so unload it first.
 
+After editing `[models]` in `sys1.toml`, apply safe additions/removals without a
+restart:
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/config/reload
+```
+
+Only `[models]` changes are applied. Hub/server settings and changed references
+for existing names return `409 restart required`; invalid TOML or a failed
+model resolution returns `400`. Neither case mutates the catalog, and reloaded
+config models report `origin: "configured"`.
+
 ### Metrics and preload
 
 ```bash

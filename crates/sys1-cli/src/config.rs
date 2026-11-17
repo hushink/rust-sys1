@@ -9,7 +9,7 @@ const CONFIG_FILE: &str = "sys1.toml";
 
 /// The optional `sys1.toml` file. Every field is optional; CLI arguments take
 /// precedence over this file.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileConfig {
     #[serde(default)]
@@ -21,7 +21,7 @@ pub struct FileConfig {
     pub models: IndexMap<String, String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HubSection {
     /// Model download/cache directory. Relative paths resolve from the config file.
@@ -36,7 +36,7 @@ pub struct HubSection {
     pub timeout_secs: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServerSection {
     pub bind: Option<SocketAddr>,

@@ -19,6 +19,7 @@
 | `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
 | `GET` | `/api/cache` | 列出磁盘模型缓存（需要 cache manager） |
 | `DELETE` | `/api/cache/{key}` | 删除一个缓存条目 |
+| `POST` | `/api/config/reload` | 应用安全配置变更（需要 reloader） |
 | `GET` | `/metrics` | Prometheus 指标（启用时） |
 | `GET` | `/api/metrics` | JSON 指标快照（启用时） |
 
@@ -95,6 +96,10 @@ let app = router_with_extensions(
   返回 `409`，需先 unload。路由要求 `enable_admin`，并通过
   `router_with_extensions` / `serve_with_extensions` 注入 [`CacheManager`]；
   CLI 用 hub 实现该接口。
+- `POST /api/config/reload` 调用注入的 [`ConfigReloader`]。CLI 会重读 TOML，
+  只应用 `[models]` 新增/移除；hub/server 或已有模型引用变更返回
+  `409 restart required`，解析或模型解析失败返回 `400`，两种情况都不修改目录。
+  配置新增的模型标记为 `origin: "configured"`。
 - 未配置 resolver 时，`POST /api/models` 返回 `501`；已配置模型的
   load/unload/reload 和 DELETE 仍可用。
 - admin 请求与 `/v1/*` 使用同一个 Bearer key。未配置 key 时 admin API 是开放的，

@@ -81,6 +81,7 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 | `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
 | `GET` | `/api/cache` | 列出缓存模型、key、大小与文件 |
 | `DELETE` | `/api/cache/{key}` | 从磁盘删除一个缓存条目 |
+| `POST` | `/api/config/reload` | 重读 `sys1.toml` 并应用安全的模型变更 |
 
 ```bash
 curl http://127.0.0.1:8080/api/models
@@ -93,6 +94,9 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 # 磁盘缓存：先列出 key，再按 key 删除；常驻模型需先 unload，否则返回 409。
 curl http://127.0.0.1:8080/api/cache
 curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
+
+# 修改 sys1.toml 的 [models] 后：
+curl -X POST http://127.0.0.1:8080/api/config/reload
 ```
 
 添加引用时会通过 hub 物化模型（已缓存则直接使用），并立即对
@@ -108,6 +112,17 @@ CLI 默认开启 `/metrics`（Prometheus）与 `/api/metrics`（JSON）；`--no-
 关闭，`--metrics` 强制开启。配置 API key 时使用与 `/v1/*` 相同的 Bearer key。
 JSON 包含请求/错误/延迟、batch 大小与耗时、模型加载/卸载、按模型请求数以及
 当前常驻模型。预加载模型在 HTTP 指标启动前已常驻，因此不会增加模型加载计数。
+
+## 配置热加载
+
+`POST /api/config/reload` 重读 `--config` 指定（或自动加载）的 `sys1.toml`，
+仅应用 `[models]` 新增/移除：
+
+- 新增模型经 hub 解析并注册为 `configured`。
+- 移除模型从运行时目录卸载（磁盘缓存保留）。
+- 修改 `[hub]`、`[server]` 或已有模型的引用返回 `409 restart required`；
+  TOML 或模型解析失败返回 `400`。两种情况都不修改目录。
+- 仅当 admin 开启且启动时加载了配置文件时，该端点才存在。
 
 ## 配置
 

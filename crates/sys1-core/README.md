@@ -54,9 +54,10 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `max_loaded` evicts the oldest model that is not held by an external `Arc`.
 - `keep_alive` removes idle models on `maintenance()` / `predict()`.
 - In-use models may temporarily exceed `max_loaded`.
-- `register(manifest)` adds a catalog entry; duplicates and alias conflicts are
-  rejected without changing the catalog. `unregister(name)` removes the entry
-  (by name or alias) and drops its resident instance.
+- `register(manifest)` adds a catalog entry as `ModelOrigin::Runtime`;
+  `register_configured` marks a config-sourced addition. Duplicates and alias
+  conflicts are rejected without changing the catalog. `unregister(name)`
+  removes the entry (by name or alias) and drops its resident instance.
 - `is_loaded(name)` reports residency without touching the LRU timestamp.
 - `origin(name)` returns `ModelOrigin::Configured` for manifests passed to
   `new` or `ModelOrigin::Runtime` for `register` additions; aliases resolve to
