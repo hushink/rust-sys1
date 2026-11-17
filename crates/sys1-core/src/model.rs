@@ -1,4 +1,5 @@
 use crate::{Answers, ModelManifest, Questions};
+use indexmap::IndexMap;
 use std::sync::Arc;
 use sys1_protocol::{State, Usage};
 use thiserror::Error;
@@ -78,11 +79,28 @@ pub trait ModelResolver: Send + Sync {
 pub struct DecisionOutput {
     pub answers: Answers,
     pub usage: Usage,
+    /// Optional per-question action probabilities produced by a model's act
+    /// head. The official System One wire response does not carry this field;
+    /// the typed in-process API exposes it.
+    pub actions: IndexMap<String, f32>,
 }
 
 impl DecisionOutput {
     pub fn new(answers: Answers, usage: Usage) -> Self {
-        Self { answers, usage }
+        Self {
+            answers,
+            usage,
+            actions: IndexMap::new(),
+        }
+    }
+
+    pub fn with_actions(mut self, actions: IndexMap<String, f32>) -> Self {
+        self.actions = actions;
+        self
+    }
+
+    pub fn action(&self, id: &str) -> Option<f32> {
+        self.actions.get(id).copied()
     }
 }
 

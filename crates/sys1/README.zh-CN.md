@@ -88,6 +88,8 @@ let output = model.predict(
   查看目录；`remove` 卸载并移除。
 - `predict` 返回 typed `DecisionOutput`；`systemone` 返回官方
   `SystemOneResponse`；`predict_batch` 调用模型原生 batch。
+  `DecisionOutput::actions` 暴露可选的逐问题动作概率（Laya 的
+  `act_probability`），官方 wire 响应不包含。
 - Engine 实现了 `ModelResolver`，可传给 `sys1-server` 的
   `router_with_resolver`，支持 `/api/models` 运行时管理。
 

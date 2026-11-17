@@ -21,6 +21,7 @@ fn exact_local_window_matches_eager_on_long_state() {
                 confidence_mode: ConfidenceMode::TypeSafe,
                 local_window,
                 max_attention_elements: sys1_laya::DEFAULT_MAX_ATTENTION_ELEMENTS,
+                ..LayaOptions::default()
             },
         )
         .expect("load Laya checkpoint")

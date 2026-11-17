@@ -3,12 +3,17 @@ use crate::config::{LayaConfig, ModernBertConfig};
 use crate::modernbert::Encoder;
 use crate::prepare::{Item, PreparedRequest, deduplicate, prepare_request};
 use crate::response::build_response;
+use crate::router::LayaRouterOptions;
 use crate::tokenizer::LayaTokenizer;
 use candle_core::{D, DType, Device, IndexOp, Tensor};
 use candle_nn::{Embedding, LayerNorm, Linear, VarBuilder, embedding, layer_norm};
 use std::path::Path;
 use sys1_core::{DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
 use sys1_protocol::State;
+
+/// One question's logits and, when the checkpoint has one, the act-head
+/// probability.
+type ScoredRow = (Vec<f32>, Option<f32>);
 
 /// Runtime options for a Laya checkpoint.
 #[derive(Clone)]
@@ -23,6 +28,10 @@ pub struct LayaOptions {
     /// Bound on `batch * heads * seq_len²` for one global-attention batch.
     /// Larger batches are split into chunks. Defaults to 64M elements.
     pub max_attention_elements: usize,
+    /// Routing settings used when these options build a `LayaRouter`.
+    pub router: LayaRouterOptions,
+    /// Router-wide language hint, e.g. `en` or `ro`.
+    pub lang_guess: Option<String>,
 }
 
 impl Default for LayaOptions {
@@ -34,6 +43,8 @@ impl Default for LayaOptions {
             confidence_mode: ConfidenceMode::TypeSafe,
             local_window: true,
             max_attention_elements: crate::DEFAULT_MAX_ATTENTION_ELEMENTS,
+            router: LayaRouterOptions::default(),
+            lang_guess: None,
         }
     }
 }
@@ -104,6 +115,91 @@ impl HeadLayer {
     }
 }
 
+struct ActHead {
+    input: Linear,
+    output: Linear,
+    compute_dtype: DType,
+}
+
+impl ActHead {
+    fn load(
+        vb: VarBuilder,
+        hidden: usize,
+        compute_dtype: DType,
+    ) -> candle_core::Result<Option<Self>> {
+        if !([
+            "act_head.0.weight",
+            "act_head.0.bias",
+            "act_head.2.weight",
+            "act_head.2.bias",
+        ]
+        .iter()
+        .all(|name| vb.contains_tensor(name)))
+        {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            input: Linear::new(
+                vb.get((256, hidden + 4), "act_head.0.weight")?
+                    .to_dtype(compute_dtype)?,
+                Some(vb.get(256, "act_head.0.bias")?.to_dtype(compute_dtype)?),
+            ),
+            output: Linear::new(
+                vb.get((2, 256), "act_head.2.weight")?
+                    .to_dtype(compute_dtype)?,
+                Some(vb.get(2, "act_head.2.bias")?.to_dtype(compute_dtype)?),
+            ),
+            compute_dtype,
+        }))
+    }
+
+    fn forward(&self, pooled: &Tensor, logits: &[f32]) -> candle_core::Result<f32> {
+        if logits.is_empty() {
+            return Ok(0.5);
+        }
+        let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut probabilities: Vec<f32> = logits.iter().map(|value| (value - max).exp()).collect();
+        let total: f32 = probabilities.iter().sum();
+        if total > 0.0 {
+            probabilities.iter_mut().for_each(|value| *value /= total);
+        }
+        let mut top = probabilities.iter().copied().fold(
+            (f32::NEG_INFINITY, f32::NEG_INFINITY),
+            |(first, second), value| {
+                if value > first {
+                    (value, first)
+                } else if value > second {
+                    (first, value)
+                } else {
+                    (first, second)
+                }
+            },
+        );
+        if probabilities.len() == 1 {
+            top.1 = 0.0;
+        }
+        let count = probabilities.len().max(2);
+        let entropy: f32 = probabilities
+            .iter()
+            .map(|value| -value * value.max(1e-9).ln())
+            .sum::<f32>()
+            / (count as f32).ln();
+        let features = Tensor::new(
+            &[top.0, top.0 - top.1, entropy, count as f32 / 255.0],
+            pooled.device(),
+        )?
+        .to_dtype(self.compute_dtype)?
+        .unsqueeze(0)?;
+        let pooled = pooled.unsqueeze(0)?.to_dtype(self.compute_dtype)?;
+        let input = Tensor::cat(&[&pooled, &features], D::Minus1)?;
+        let hidden = input.apply(&self.input)?.gelu_erf()?;
+        let logits = hidden.apply(&self.output)?.to_dtype(DType::F32)?;
+        let probabilities = candle_nn::ops::softmax(&logits, D::Minus1)?;
+        let values = probabilities.to_vec2::<f32>()?;
+        Ok(values[0][0])
+    }
+}
+
 fn attention_softmax(scores: &Tensor) -> candle_core::Result<Tensor> {
     if matches!(scores.dtype(), DType::F16 | DType::BF16) {
         candle_nn::ops::softmax(&scores.to_dtype(DType::F32)?, D::Minus1)?.to_dtype(scores.dtype())
@@ -121,6 +217,7 @@ pub struct LayaModel {
     scorer_norm: LayerNorm,
     scorer_in: Linear,
     scorer_out: Linear,
+    act_head: Option<ActHead>,
     config: LayaConfig,
     device: Device,
     dtype: DType,
@@ -212,6 +309,8 @@ impl LayaModel {
             .map_err(|error| ModelError::load(error.to_string()))?;
         let scorer_out = linear_dtype(hidden, 1, vb.pp("scorer.3"), compute_dtype)
             .map_err(|error| ModelError::load(error.to_string()))?;
+        let act_head = ActHead::load(vb.clone(), hidden, compute_dtype)
+            .map_err(|error| ModelError::load(error.to_string()))?;
 
         Ok(Self {
             tokenizer,
@@ -221,6 +320,7 @@ impl LayaModel {
             scorer_norm,
             scorer_in,
             scorer_out,
+            act_head,
             config,
             device: options.device,
             dtype: model_dtype,
@@ -231,7 +331,7 @@ impl LayaModel {
         })
     }
 
-    fn forward(&self, prepared: &[PreparedRequest]) -> Result<Vec<Vec<f32>>, ModelError> {
+    fn forward(&self, prepared: &[PreparedRequest]) -> Result<Vec<ScoredRow>, ModelError> {
         let items: Vec<&Item> = prepared
             .iter()
             .flat_map(|request| request.items.iter())
@@ -249,7 +349,7 @@ impl LayaModel {
             .collect())
     }
 
-    fn forward_items(&self, unique: &[&Item]) -> Result<Vec<Vec<f32>>, ModelError> {
+    fn forward_items(&self, unique: &[&Item]) -> Result<Vec<ScoredRow>, ModelError> {
         let batch = unique.len();
         let length = unique.iter().map(|item| item.ids.len()).max().unwrap_or(0);
         if batch == 0 || length == 0 {
@@ -323,11 +423,27 @@ impl LayaModel {
             })?;
         }
 
-        if batch >= 8 && !self.device.is_cpu() {
-            self.score_batched(&hidden, unique, length)
+        let logits = if batch >= 8 && !self.device.is_cpu() {
+            self.score_batched(&hidden, unique, length)?
         } else {
-            self.score_rows(&hidden, unique)
+            self.score_rows(&hidden, unique)?
+        };
+        let mut output = Vec::with_capacity(logits.len());
+        for (row, values) in logits.into_iter().enumerate() {
+            let action = match &self.act_head {
+                Some(head) => {
+                    let pooled = hidden
+                        .i(row)
+                        .map_err(inference_error)?
+                        .i(0)
+                        .map_err(inference_error)?;
+                    Some(head.forward(&pooled, &values).map_err(inference_error)?)
+                }
+                None => None,
+            };
+            output.push((values, action));
         }
+        Ok(output)
     }
 
     fn score_rows(&self, hidden: &Tensor, items: &[&Item]) -> Result<Vec<Vec<f32>>, ModelError> {
@@ -547,9 +663,10 @@ mod tests {
             serde_json::from_value(case["logits"].clone()).expect("expected logits");
         assert_eq!(logits.len(), expected.len());
         for (row, expected_row) in expected.iter().enumerate() {
-            assert_eq!(logits[row].len(), expected_row.len());
+            let actual_row = &logits[row].0;
+            assert_eq!(actual_row.len(), expected_row.len());
             for (column, expected_value) in expected_row.iter().enumerate() {
-                let actual = logits[row][column];
+                let actual = actual_row[column];
                 assert!(
                     (actual - expected_value).abs() <= 1e-3,
                     "logits[{row}][{column}]: expected {expected_value}, got {actual}"

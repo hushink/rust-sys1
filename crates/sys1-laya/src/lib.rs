@@ -9,6 +9,7 @@ mod bundle;
 mod calibration;
 mod config;
 mod factory;
+mod language;
 mod model;
 mod modernbert;
 #[cfg(feature = "onnx")]
@@ -25,10 +26,11 @@ pub use bundle::{
 };
 pub use calibration::ConfidenceMode;
 pub use factory::LayaFactory;
+pub use language::LanguageAnalysis;
 pub use model::{LayaModel, LayaOptions};
 #[cfg(feature = "onnx")]
 pub use onnx::LayaOnnxModel;
-pub use router::LayaRouter;
+pub use router::{LayaRouter, LayaRouterOptions, RouteDecision, RouteHints, RouteVariant};
 
 /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
 ///

@@ -64,6 +64,9 @@ let response = registry.predict("laya-latest", &state, &questions)?;
   their canonical entry.
 - `predict_output` returns typed `DecisionOutput`; `predict` wraps it into the
   official `SystemOneResponse` with the canonical model name.
+- `DecisionOutput::actions` carries optional per-question action probabilities
+  (for example Laya's `action.act_probability`). It is a typed extension; the
+  official wire response does not include it.
 - A `ModelResolver` is not part of the registry: callers resolve a reference to
   manifests, register them, and pass a factory that can load them. The CLI uses
   this to add hub models while the server is running.

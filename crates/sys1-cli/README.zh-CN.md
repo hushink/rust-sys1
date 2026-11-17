@@ -66,6 +66,9 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --no-local-window          # local 层退回 eager attention
 --max-len <tokens>
 --laya-confidence typesafe|laya
+--laya-router-default english|multilingual|typed-decisions  # 路由兜底 checkpoint
+--laya-auto-task-detection # 启用 typed-decisions 工作流匹配
+--laya-lang-guess <code>   # 路由级语言提示，如 en、ro
 --batch-max 32             # 每次前向的最大请求数
 --batch-wait-ms 2          # 收集 batch 的等待窗口
 --max-attention-elements 67108864  # 按 attention 显存切分长 batch
@@ -180,6 +183,9 @@ dtype = "f16"
 batch_max = 32
 max_attention_elements = 67108864
 metrics = true
+laya_router_default = "multilingual"   # english | multilingual | typed-decisions
+laya_auto_task_detection = false       # 启用工作流匹配
+# laya_lang_guess = "en"
 preload = ["laya-latest"]
 log_level = "info"
 log_format = "text"          # text | json

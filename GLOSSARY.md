@@ -92,6 +92,11 @@ _Avoid_: Probability
 一次 System One API 调用的完整结果，由 model、answers、usage 组成。
 _Avoid_: Answer
 
+**Act head（动作头）**：
+部分 checkpoint 附带的可选分类头，基于 pool 后的表示与答案分布特征预测 `action.act_probability`。
+它只出现在进程内 `DecisionOutput.actions` 中，不属于官方 wire Response。
+_Avoid_: Action、policy head（与决策语义混淆）
+
 **Model family（模型族）**：
 共享同一推理架构与权重格式的一组决策模型，如 Laya、Kev。
 _Avoid_: Model type、architecture

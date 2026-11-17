@@ -141,20 +141,33 @@ let urgency = output.answers.score("urgency")?;
   ≥512 token 时启用）；设为 `false` 使用 eager attention。
 - `max_attention_elements`：单次 global-attention batch 的
   `batch * heads * seq_len²` 上限（默认 64M 元素），超出会切分。
+- `router` / `lang_guess`：见 [Router](#router)。
+- checkpoint 若包含 `act_head.*`，还会预测 `action.act_probability`，通过
+  `output.action(id)` 与 `output.actions` 读取。ONNX 导出暂未包含该 head，
+  因此该后端的 `actions` 为空。
 
 `TypeSafe` confidence 为 `(K * p_max - 1) / (K - 1)`；`LayaNative` 为
 `1 - H(p) / ln(K)`。`noul` 按官方形状不携带 confidence。
 
 ## Router
 
-`LayaRouter::new(root, options)` 需要 Laya 仓库根目录（含 `multilingual/` 与
-`typed-decisions/` 子目录）。选择顺序：
+`LayaRouter::new(root, options)` 需要 Laya 仓库根目录（含 `english/`、
+`multilingual/` 与 `typed-decisions/` 子目录）。实现移植了官方 router 的文字
+系统检测、拉丁语停用词画像、缩写/全大写规则、混合片段处理，以及与 Python
+`repr` 一致的 reason 字符串。选择优先级：
 
-1. 问题 ID 集合命中四种 typed-decisions workflow 之一 → `typed-decisions`；
-2. 以 ASCII 为主且包含英文功能词 → `english`；
-3. 其余 → `multilingual`。
+1. 显式 `model` hint（`RouteHints` / `route_with`）；
+2. 显式 `task` hint；
+3. 命中 typed-decisions 工作流（仅当 `auto_task_detection` 开启）；
+4. 显式 `lang` hint；
+5. 单次调用或 router 级 `lang_guess`；
+6. 语言分析：英文 → `english`，其余 → `default` 变体（默认 `multilingual`）。
 
-v1 的 Router 是启发式；完整官方 routing golden 对齐待补。
+`LayaRouterOptions { default, auto_task_detection }` 对齐官方默认值
+（`multilingual`、`false`）；`LayaOptions::lang_guess` 设置 router 级提示。
+官方 routing golden 的全部 159 个用例均可精确复现 checkpoint、workflow、
+reason 与 detection 字段。
+
 `LayaRouter::predict_batch` 会按选中的 checkpoint 分组，因此 `laya-latest`
 也能受益于服务端 batching，而不会把不同 checkpoint 混进同一批。
 
@@ -179,13 +192,16 @@ checkpoint 布局知识集中在 sys1-laya，组合层无需再定义 Laya 前�
 
 ## 数值对齐
 
-Golden 测试对比官方 Laya vectors 的 `input_ids`、`markers`、logits 与答案。
-三个 checkpoint 的 `case_dict_state` 均在 1e-3 内一致。
+Golden 测试对比官方 Laya vectors 的 `input_ids`、`markers`、logits、答案与
+`action.act_probability`。三个 checkpoint 的 `case_dict_state` 均在 1e-3 内一致。
+routing 测试回放官方 probe 文件，要求 model/workflow/reason/detection 完全一致。
 
 ```bash
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
 $env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
+$env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/route_probe.json"
 cargo test --offline -p sys1-laya -- --ignored --nocapture
+cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
 ```
 
 ## 性能

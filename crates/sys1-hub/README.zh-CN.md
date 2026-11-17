@@ -95,3 +95,15 @@ cargo test --offline -p sys1-hub
 - ModelScope `Root`/`Recursive` 列表、token + cookie 头，以及 3000 条递归列表
   截断后的目录拆分；
 - LRU 配额淘汰、常驻模型保护、超大模型拒绝，以及 pull 触发的淘汰。
+
+真实上游检查默认跳过，需显式开启：
+
+```powershell
+$env:SYS1_LIVE_HUB = "1"
+# huggingface.co 不可达时可选用镜像：
+$env:HF_ENDPOINT = "https://hf-mirror.com"
+cargo test --offline -p sys1-hub --test live -- --nocapture
+```
+
+测试会解析真实的 Hugging Face manifest（`convaiinnovations/laya-multilingual`）
+与 ModelScope manifest（`Qwen/Qwen2.5-0.5B-Instruct`），并校验返回的文件列表与大小。

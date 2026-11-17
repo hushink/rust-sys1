@@ -147,6 +147,11 @@ let urgency = output.answers.score("urgency")?;
   (default `true`, applied at ≥512 tokens); set `false` for eager attention.
 - `max_attention_elements`: cap for `batch * heads * seq_len²` in one
   global-attention batch (default 64M elements); larger batches are split.
+- `router` / `lang_guess`: see [Router](#router).
+- Checkpoints that carry an `act_head.*` head also predict
+  `action.act_probability`, exposed as `output.action(id)` and
+  `output.actions`. The ONNX export does not include the head yet, so that
+  backend returns an empty `actions` map.
 
 `TypeSafe` confidence is `(K * p_max - 1) / (K - 1)`; `LayaNative` is
 `1 - H(p) / ln(K)`. `noul` answers never carry confidence, matching the official shape.
@@ -154,13 +159,24 @@ let urgency = output.answers.score("urgency")?;
 ## Router
 
 `LayaRouter::new(root, options)` expects the Laya repository root with
-`multilingual/` and `typed-decisions/` subdirectories. It selects:
+`english/`, `multilingual/`, and `typed-decisions/` subdirectories. It ports the
+official router's script detection, Latin stopword profiles, acronym/shouted
+rules, mixed-segment handling, and Python-compatible reason strings. Selection
+precedence is:
 
-1. `typed-decisions` when the question-id set matches one of the four workflows;
-2. `english` for mostly-ASCII text with English function words;
-3. `multilingual` otherwise.
+1. an explicit `model` hint (`RouteHints` / `route_with`);
+2. an explicit `task` hint;
+3. a typed-decisions workflow, only when `auto_task_detection` is enabled;
+4. an explicit `lang` hint;
+5. the per-call or router-wide `lang_guess`;
+6. language analysis: `english` for English text, otherwise the `default`
+   variant (`multilingual` unless configured).
 
-The router is heuristic in v1; full official routing golden parity is pending.
+`LayaRouterOptions { default, auto_task_detection }` mirrors the official
+defaults (`multilingual`, `false`); `LayaOptions::lang_guess` sets the
+router-wide hint. The official routing golden replays all 159 probe cases with
+exact checkpoint, workflow, reason, and detection fields.
+
 `LayaRouter::predict_batch` groups requests by selected checkpoint, so
 `laya-latest` also benefits from server batching without mixing checkpoints.
 
@@ -187,13 +203,17 @@ define Laya-prefixed APIs:
 
 ## Parity
 
-Golden tests compare `input_ids`, `markers`, logits, and answers against the
-official Laya vectors. The three checkpoints match `case_dict_state` within 1e-3.
+Golden tests compare `input_ids`, `markers`, logits, answers, and
+`action.act_probability` against the official Laya vectors. The three
+checkpoints match `case_dict_state` within 1e-3. The routing test replays the
+official probe file and requires exact model/workflow/reason/detection output.
 
 ```bash
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
 $env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
+$env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/route_probe.json"
 cargo test --offline -p sys1-laya -- --ignored --nocapture
+cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
 ```
 
 ## Performance

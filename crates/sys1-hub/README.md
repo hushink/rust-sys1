@@ -101,3 +101,16 @@ Integration tests start loopback model centers and cover:
   3000-entry recursive listing split;
 - quota eviction by LRU, resident protection, oversized-model rejection, and
   eviction triggered by a pull.
+
+Live upstream checks are opt-in and skipped by default:
+
+```powershell
+$env:SYS1_LIVE_HUB = "1"
+# Optional mirror when huggingface.co is unreachable:
+$env:HF_ENDPOINT = "https://hf-mirror.com"
+cargo test --offline -p sys1-hub --test live -- --nocapture
+```
+
+They resolve a real Hugging Face manifest (`convaiinnovations/laya-multilingual`)
+and a real ModelScope manifest (`Qwen/Qwen2.5-0.5B-Instruct`), asserting the
+returned file lists and sizes.

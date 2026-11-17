@@ -47,6 +47,9 @@ pub struct ServerSection {
     pub dtype: Option<String>,
     pub max_len: Option<usize>,
     pub laya_confidence: Option<String>,
+    pub laya_auto_task_detection: Option<bool>,
+    pub laya_router_default: Option<String>,
+    pub laya_lang_guess: Option<String>,
     pub batch_max: Option<usize>,
     pub batch_wait_ms: Option<u64>,
     pub max_attention_elements: Option<usize>,
@@ -212,6 +215,9 @@ mod tests {
             batch_wait_ms = 1
             local_window = true
             metrics = false
+            laya_auto_task_detection = true
+            laya_router_default = "typed-decisions"
+            laya_lang_guess = "en"
             preload = ["laya-latest"]
             log_level = "debug"
             log_format = "json"
@@ -225,6 +231,12 @@ mod tests {
         assert_eq!(config.hub.max_cache_bytes, Some(34_359_738_368));
         assert_eq!(config.server.batch_max, Some(64));
         assert_eq!(config.server.metrics, Some(false));
+        assert_eq!(config.server.laya_auto_task_detection, Some(true));
+        assert_eq!(
+            config.server.laya_router_default.as_deref(),
+            Some("typed-decisions")
+        );
+        assert_eq!(config.server.laya_lang_guess.as_deref(), Some("en"));
         assert_eq!(config.server.preload, vec!["laya-latest".to_owned()]);
         assert_eq!(config.server.log_level.as_deref(), Some("debug"));
         assert_eq!(config.server.log_format.as_deref(), Some("json"));

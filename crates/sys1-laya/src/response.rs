@@ -10,22 +10,26 @@ pub(crate) fn build_response(
     config: &LayaConfig,
     confidence_mode: ConfidenceMode,
     request: PreparedRequest,
-    logits: &mut impl Iterator<Item = Vec<f32>>,
+    logits: &mut impl Iterator<Item = (Vec<f32>, Option<f32>)>,
 ) -> DecisionOutput {
     let input_tokens = request.items.iter().map(|item| item.ids.len() as u64).sum();
     let mut answers: IndexMap<String, Answer> = IndexMap::with_capacity(request.items.len());
+    let mut actions = IndexMap::new();
 
     for item in request.items {
-        let values = logits.next().expect("one logits vector per item");
+        let (values, action) = logits.next().expect("one logits vector per item");
         let temperature = config.temperature_for(item.question.kind, values.len());
         let probabilities = probability(&values, temperature);
         let conf = confidence(confidence_mode, &probabilities);
 
+        if let Some(action) = action {
+            actions.insert(item.question.id.clone(), round4(action as f64) as f32);
+        }
         let answer = answer_for(&item, &probabilities, conf);
         answers.insert(item.question.id, answer);
     }
 
-    DecisionOutput::new(Answers::new(answers), Usage::new(input_tokens, 0))
+    DecisionOutput::new(Answers::new(answers), Usage::new(input_tokens, 0)).with_actions(actions)
 }
 
 fn answer_for(item: &Item, probabilities: &[f32], conf: f64) -> Answer {

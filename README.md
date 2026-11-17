@@ -570,10 +570,20 @@ $env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
 $env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
 $env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
 cargo test --offline -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
+
+# Official routing golden (159 probes) and live hub manifests
+$env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/route_probe.json"
+cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
+$env:SYS1_LIVE_HUB="1"
+cargo test --offline -p sys1-hub --test live -- --nocapture
 ```
 
 The exporter produced logits within 2.5e-6 of the official golden vectors for
-all three checkpoints; the Rust parity test compares the full answer objects.
+all three checkpoints; the Rust parity test compares the full answer objects,
+including `action.act_probability`. The routing test matches the selected
+checkpoint, workflow, reason, and language profile on every official probe.
+Live hub tests hit real Hugging Face and ModelScope endpoints; set
+`HF_ENDPOINT=https://hf-mirror.com` when huggingface.co is unreachable.
 
 Hub tests spin up loopback model centers and cover static HTTP manifests,
 Bearer tokens, Range-resumed downloads, HF pagination/subfolders/LFS hashes,
@@ -602,7 +612,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 - A published upstream Laya ONNX artifact. The repository exporter now produces
   parity-checked models locally; TensorRT remains available only through the
   ORT TensorRT EP.
-- Long-context scanning, act head, abstention, parallel option layout (v1.1).
+- Long-context scanning, abstention, parallel option layout (v1.1).
 - FlashAttention for long contexts: a prototype built with a hdim64-only
   candle-flash-attn + CUDA 13.3 and ran at ~69 ms vs ~181 ms for a 932-token
   state, but diverged from eager/F32 answers. The upstream full build with
@@ -611,8 +621,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 - CPU int8 quantization / MKL. A candle `Q8_0` GEMM probe was only ~6% faster
   than F32 on a representative 2304×768×1024 layer and `Q4_0` was slower, so it
   was not integrated; MKL crates are not available in the offline cache.
-- The `laya-latest` router is heuristic; full official routing golden parity is pending.
-- HF / ModelScope live-download integration tests.
+- ONNX exports do not include Laya's act head; `actions` is empty on that backend.
 - Laya weight license must be checked before redistribution. The repo does not bundle weights.
 
 ## Documentation

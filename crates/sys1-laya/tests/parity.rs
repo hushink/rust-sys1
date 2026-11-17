@@ -118,6 +118,13 @@ fn run_checkpoint(golden: &Path, checkpoint: &Path) -> usize {
             }
             other => panic!("unexpected answer type {other}"),
         }
+        if let Some(action) = expected.get("action") {
+            let probability = action["act_probability"]
+                .as_f64()
+                .expect("expected act_probability");
+            let actual = output.action(id).expect("act probability");
+            assert_close(actual as f64, probability, &format!("{id}.action"));
+        }
         checked += 1;
     }
     checked

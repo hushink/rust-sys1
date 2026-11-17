@@ -186,7 +186,7 @@ impl DecisionModel for LayaOnnxModel {
         if !prepared.is_empty() {
             match self.forward(&prepared) {
                 Ok(outputs) => {
-                    let mut outputs = outputs.into_iter();
+                    let mut outputs = outputs.into_iter().map(|logits| (logits, None));
                     for (request, slot) in prepared.into_iter().zip(prepared_slots) {
                         slots[slot] = Some(Ok(build_response(
                             &self.config,

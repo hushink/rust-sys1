@@ -14,6 +14,7 @@ sys1-ort = { path = "../sys1-ort", optional = true }
 candle-core = { version = "0.11", default-features = false }
 candle-nn = { version = "0.11", default-features = false }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+unicode-general-category = "1.1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

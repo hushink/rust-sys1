@@ -231,8 +231,10 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 缓存配额与 LRU 淘汰已实现：`HubConfig::max_cache_bytes`、`Hub::cache_usage` / `cache_entries` / `enforce_quota`、`CacheResidency` 常驻保护；CLI `/api/cache` 与 `sys1 list` 输出 limit/used/free/reclaimable，`sys1 doctor` 输出配额状态。测试覆盖 LRU 顺序、常驻保护、超大模型拒绝、pull 触发淘汰与活动下载保护。ADR 0012。
 - 生产收尾：CORS allowlist/关闭与优雅关闭已实现并有测试；CLI Ctrl-C/SIGTERM 停止接收并 drain。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
-- 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
-- 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。
+- 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致，含 `action.act_probability`；multilingual 特殊 token 已修正。
+- 路由与 act head：官方 routing probe 159/159 用例的 model、workflow、reason 与 detection 完全一致；act head 在 candle 后端由 checkpoint 的 `act_head.*` 自动启用并写入 `DecisionOutput.actions`（官方 wire 不包含）。ONNX 导出暂未包含 act head。细节见 ADR 0013。
+- 真实上游：`sys1-hub` 的 `SYS1_LIVE_HUB=1` 测试可解析真实 HF 与 ModelScope manifest；受限网络可用 `HF_ENDPOINT=https://hf-mirror.com`。
+- 待补：zstd、long/abstention/parallel、ONNX act head/ORT/TensorRT、GPU 实机 CI。
 
 ## 11. 已确认与遗留
 
@@ -240,7 +242,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 
 1. 超长 state：400 + `max_tokens_exceeded`，不静默截断（已实现）。
 2. 二进制名：`sys1`（已实现）。
-3. `laya-latest`：自动注册三个显式变体，并用启发式 Router 选择 checkpoint。
+3. `laya-latest`：自动注册三个显式变体，并用与官方 golden 对齐的 Router 选择 checkpoint。
 
 遗留：
 

@@ -69,6 +69,9 @@ Useful flags:
 --no-local-window          # use eager attention for local layers
 --max-len <tokens>
 --laya-confidence typesafe|laya
+--laya-router-default english|multilingual|typed-decisions  # router fallback
+--laya-auto-task-detection # opt in to typed-decisions workflow matching
+--laya-lang-guess <code>   # router-wide language hint, e.g. en or ro
 --batch-max 32             # requests per forward pass
 --batch-wait-ms 2          # batch collection window
 --max-attention-elements 67108864  # chunk long batches by attention memory
@@ -196,6 +199,9 @@ dtype = "f16"
 batch_max = 32
 max_attention_elements = 67108864
 metrics = true
+laya_router_default = "multilingual"   # english | multilingual | typed-decisions
+laya_auto_task_detection = false       # opt in to workflow matching
+# laya_lang_guess = "en"
 preload = ["laya-latest"]
 log_level = "info"
 log_format = "text"          # text | json

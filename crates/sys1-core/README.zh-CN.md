@@ -61,6 +61,8 @@ let response = registry.predict("laya-latest", &state, &questions)?;
   `ModelOrigin::Runtime`（通过 `register` 添加）；别名会解析到规范条目。
 - `predict_output` 返回 typed `DecisionOutput`；`predict` 再包装为带规范模型名的
   官方 `SystemOneResponse`。
+- `DecisionOutput::actions` 携带可选的逐问题动作概率（例如 Laya 的
+  `action.act_probability`）。它是 typed 扩展，官方 wire 响应不会包含。
 - `ModelResolver` 不属于注册表：调用方把引用解析成 manifest、注册它们，并提供
   能加载这些 manifest 的 factory。CLI 用它实现服务运行期间从 hub 添加模型。
 

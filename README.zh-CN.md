@@ -531,10 +531,19 @@ $env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
 $env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
 $env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
 cargo test --offline -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
+
+# 官方 routing golden（159 个用例）与真实 hub manifest
+$env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/route_probe.json"
+cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
+$env:SYS1_LIVE_HUB="1"
+cargo test --offline -p sys1-hub --test live -- --nocapture
 ```
 
 导出器在三个 checkpoint 上的 logits 与官方 golden 最大误差 2.5e-6；
-Rust parity 测试进一步比较完整答案对象。
+Rust parity 测试进一步比较完整答案对象（含 `action.act_probability`）。
+routing 测试在每个官方 probe 上都要求 checkpoint、workflow、reason 与语言画像
+完全一致。真实 hub 测试会访问 Hugging Face 与 ModelScope；无法访问
+huggingface.co 时设置 `HF_ENDPOINT=https://hf-mirror.com`。
 
 Hub 测试会启动本地回环模型中心，覆盖静态 manifest、Bearer token、Range
 断点续传、HF 分页/子目录/LFS hash，以及 ModelScope token 头与 3000 条截断拆分。
@@ -560,14 +569,13 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 - TensorRT EP 的 CI 需要安装了 TensorRT 的 self-hosted GPU runner。
 - 上游发布的 Laya ONNX 产物。仓库内的导出器已能本地生成并完成 golden 对齐；
   TensorRT 仍只能通过 ORT TensorRT EP 使用。
-- long context 扫描、act head、abstention、parallel option layout（v1.1）。
+- long context 扫描、abstention、parallel option layout（v1.1）。
 - 长上下文 FlashAttention：用 hdim64-only candle-flash-attn + CUDA 13.3 的原型
   把 932 token 延迟从 ~181 ms 降到 ~69 ms，但答案与 eager/F32 不一致；上游完整
   构建在 CUDA 13.4/Windows 上还遇到 `cicc` access violation。数值对齐前不合并。
 - CPU int8 量化 / MKL。用 candle `Q8_0` 对代表性 2304×768×1024 层做 GEMM 探测只比
   F32 快约 6%，`Q4_0` 更慢，因此未集成；MKL crate 不在离线缓存中。
-- `laya-latest` Router 目前是启发式；完整官方 routing golden 对齐待补。
-- HF / ModelScope 在线下载集成测试。
+- ONNX 导出暂不包含 Laya 的 act head；该后端 `actions` 为空。
 - Laya 权重再分发前需确认许可证；仓库不包含权重。
 
 ## 文档

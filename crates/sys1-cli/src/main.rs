@@ -26,8 +26,9 @@ use sys1_core::{
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
     ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory as CheckpointFactory,
-    LayaModel as CheckpointModel, LayaOptions as ModelOptions, has_checkpoint_variants,
-    is_model_directory, local_checkpoint_manifest, register_checkpoint_bundle, set_tf32,
+    LayaModel as CheckpointModel, LayaOptions as ModelOptions, LayaRouterOptions, RouteVariant,
+    has_checkpoint_variants, is_model_directory, local_checkpoint_manifest,
+    register_checkpoint_bundle, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{
@@ -108,6 +109,15 @@ struct ServeArgs {
     /// Confidence mode: typesafe or laya (default: typesafe).
     #[arg(long)]
     laya_confidence: Option<String>,
+    /// Auto-select typed-decisions when the question ids match a published workflow.
+    #[arg(long)]
+    laya_auto_task_detection: bool,
+    /// Fallback checkpoint: english, multilingual, or typed-decisions.
+    #[arg(long, value_name = "VARIANT")]
+    laya_router_default: Option<String>,
+    /// Router-wide language hint, e.g. en or ro.
+    #[arg(long, value_name = "CODE")]
+    laya_lang_guess: Option<String>,
     /// Maximum requests per model forward pass (default: 32).
     #[arg(long)]
     batch_max: Option<usize>,
@@ -182,6 +192,15 @@ struct RunArgs {
     /// Confidence mode: typesafe or laya (default: typesafe).
     #[arg(long)]
     laya_confidence: Option<String>,
+    /// Auto-select typed-decisions when the question ids match a published workflow.
+    #[arg(long)]
+    laya_auto_task_detection: bool,
+    /// Fallback checkpoint: english, multilingual, or typed-decisions.
+    #[arg(long, value_name = "VARIANT")]
+    laya_router_default: Option<String>,
+    /// Router-wide language hint, e.g. en or ro.
+    #[arg(long, value_name = "CODE")]
+    laya_lang_guess: Option<String>,
     /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
     #[arg(long)]
     tf32: bool,
@@ -310,6 +329,15 @@ fn serve_command(
     let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
+    let auto_task_detection =
+        args.laya_auto_task_detection || server.laya_auto_task_detection.unwrap_or(false);
+    let router_default = args
+        .laya_router_default
+        .or_else(|| server.laya_router_default.clone())
+        .unwrap_or_else(|| "multilingual".to_owned());
+    let lang_guess = args
+        .laya_lang_guess
+        .or_else(|| server.laya_lang_guess.clone());
     let options = make_model_options(
         &device,
         &dtype,
@@ -317,6 +345,9 @@ fn serve_command(
         &confidence,
         local_window,
         max_attention_elements,
+        auto_task_detection,
+        &router_default,
+        lang_guess,
     )?;
     let specs = if args.models.is_empty() {
         config.model_specs()
@@ -481,6 +512,15 @@ fn run_command(
     let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
+    let auto_task_detection =
+        args.laya_auto_task_detection || server.laya_auto_task_detection.unwrap_or(false);
+    let router_default = args
+        .laya_router_default
+        .or_else(|| server.laya_router_default.clone())
+        .unwrap_or_else(|| "multilingual".to_owned());
+    let lang_guess = args
+        .laya_lang_guess
+        .or_else(|| server.laya_lang_guess.clone());
     let hub = make_hub(cache, offline, max_cache_bytes, config)?;
     let options = make_model_options(
         &device,
@@ -489,6 +529,9 @@ fn run_command(
         &confidence,
         local_window,
         max_attention_elements,
+        auto_task_detection,
+        &router_default,
+        lang_guess,
     )?;
     let reference = config.model_reference(&args.reference);
     let pulled = pull_model(&hub, &reference)?;
@@ -681,6 +724,7 @@ fn make_hub(
     Ok(Hub::new(config)?)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_model_options(
     device: &str,
     dtype: &str,
@@ -688,6 +732,9 @@ fn make_model_options(
     confidence: &str,
     local_window: bool,
     max_attention_elements: usize,
+    auto_task_detection: bool,
+    router_default: &str,
+    lang_guess: Option<String>,
 ) -> anyhow::Result<ModelOptions> {
     Ok(ModelOptions {
         device: resolve_device(device)?,
@@ -696,6 +743,19 @@ fn make_model_options(
         confidence_mode: parse_confidence(confidence)?,
         local_window,
         max_attention_elements,
+        router: LayaRouterOptions {
+            default: parse_router_default(router_default)?,
+            auto_task_detection,
+        },
+        lang_guess,
+    })
+}
+
+fn parse_router_default(value: &str) -> anyhow::Result<RouteVariant> {
+    RouteVariant::from_name(value).ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown router default `{value}`; expected english, multilingual, or typed-decisions"
+        )
     })
 }
 

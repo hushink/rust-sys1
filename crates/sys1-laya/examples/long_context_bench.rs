@@ -88,6 +88,7 @@ fn load(
             confidence_mode: ConfidenceMode::TypeSafe,
             local_window,
             max_attention_elements: sys1_laya::DEFAULT_MAX_ATTENTION_ELEMENTS,
+            ..LayaOptions::default()
         },
     )?)
 }
