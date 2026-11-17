@@ -76,6 +76,8 @@ catalog changes. It is enabled by default and uses the same Bearer key as
 | `POST` | `/api/models/{name}/reload` | Unload and load again |
 | `POST` | `/api/models` | Resolve a reference and add it to the live catalog |
 | `DELETE` | `/api/models/{name}` | Unload and remove it from the live catalog |
+| `GET` | `/api/cache` | List cached models, keys, sizes, and files |
+| `DELETE` | `/api/cache/{key}` | Remove a cache entry from disk |
 
 ```bash
 curl http://127.0.0.1:8080/api/models
@@ -84,6 +86,11 @@ curl -X POST http://127.0.0.1:8080/api/models \
   -H 'Content-Type: application/json' \
   -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+
+# Disk cache: list keys, then delete one by key. Resident models must be
+# unloaded first (409 otherwise).
+curl http://127.0.0.1:8080/api/cache
+curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 ```
 
 Adding a reference materializes it through the hub (unless cached) and makes it

@@ -99,7 +99,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - Bearer 可选：配置了 key 就强制校验；未配置则接受任意/无 key；非 loopback 绑定且未配置 key 时告警。
 - 未知模型返回 400 `{detail: ...}`。
 - `/v1/*` 不输出 Laya 私有字段；扩展字段放到 `/api/*` 或响应头（后续）。
-- 运行时模型管理：`/api/models` 提供目录/常驻状态、`load`/`unload`/`reload`、按引用添加与删除；与 `/v1/*` 共用 Bearer，库内默认关闭（`ServerConfig::enable_admin`），`sys1 serve` 默认开启并可用 `--no-admin` 关闭。运行时增删不持久化，重启后以配置 manifest 为准。细节见 ADR 0008。
+- 运行时模型管理：`/api/models` 提供目录/常驻状态、`load`/`unload`/`reload`、按引用添加与删除；`GET /api/models` 标记 `configured`/`runtime`，`POST /api/models` 可用 `"load": true` 添加并加载（失败回滚）。与 `/v1/*` 共用 Bearer，库内默认关闭（`ServerConfig::enable_admin`），`sys1 serve` 默认开启并可用 `--no-admin` 关闭。运行时增删不持久化，重启后以配置 manifest 为准。细节见 ADR 0008。
+- 磁盘缓存管理：`GET /api/cache` / `DELETE /api/cache/{key}` 在服务进程内列出/删除模型缓存；`sys1-server` 通过 `CacheManager` trait 注入（CLI 用 hub 实现），不依赖 `sys1-hub`；常驻模型返回 409，需先 unload。
 - 可观测性：`/metrics`（Prometheus 文本）与 `/api/metrics`（JSON）记录 systemone 请求/错误/延迟、batch 大小与耗时、模型加载/卸载/失败、按模型请求数、常驻模型数与 uptime；`ServerConfig::enable_metrics` 库内默认关闭，CLI 默认开启。端点与 `/v1/*` 共用 Bearer。
 - 预加载：`[server] preload` / `--preload` 在监听端口前调用注册表 `acquire`，避免首请求冷加载；失败带模型名终止启动。
 - 超长 state 的 v1 行为待确认：建议返回 400，detail 含 `max_tokens_exceeded`（不做静默截断）。
@@ -180,6 +181,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - `/api/models` 管理 API 默认开启；`--no-admin` 或 `[server] admin = false` 关闭；未设置 API key 时启动日志告警。
 - `/metrics` 与 `/api/metrics` 默认开启；`--no-metrics` 或 `[server] metrics = false` 关闭；`--metrics` 可强制开启。
 - `[server] preload` / `--preload NAME` 在 serve 前加载模型，失败则启动失败。
+- admin 开启时，CLI 额外提供 `/api/cache`（列出 key/大小/文件）与 `DELETE /api/cache/{key}`，与 `sys1 list`/`rm` 对齐。
 - 二进制名暂定 `sys1`。
 
 ## 9. 验收
@@ -207,6 +209,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 命名边界已整理：非 `sys1-laya` crate 不再定义 `Laya*` 标识符；checkpoint 布局辅助移入 `sys1-laya`。
 - 已实现 `/metrics` 与 `/api/metrics`（systemone、batching、模型生命周期、按模型请求数）；`preload` 启动预加载在 `serve` 绑定端口前执行，未知模型即失败。
 - 管理 API 支持 `POST /api/models` 的 `"load": true`（加载失败回滚注册），`GET /api/models` 标记 `configured` / `runtime`。
+- 服务进程内磁盘缓存管理已实现：`GET /api/cache` 与 `DELETE /api/cache/{key}`；`Hub::remove_cached` 校验 cache key 防止路径穿越，常驻模型拒绝删除。
 - Engine 开销基准（CPU F32 multilingual，30 次交替）：直接推理 121.7 ms 均值、engine 122.6 ms，约 0.9 ms（<1%）；无需进一步优化 manifest 克隆。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。

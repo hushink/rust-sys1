@@ -10,7 +10,7 @@ use sys1_laya::{
 /// Resolves hub references into decision-model checkpoints and registers them
 /// with the factory used by the running registry.
 pub struct HubModelResolver {
-    hub: Hub,
+    hub: Arc<Hub>,
     factory: Arc<CheckpointFactory>,
     options: ModelOptions,
     /// `[models]` aliases from `sys1.toml`, so the admin API can accept the
@@ -20,7 +20,7 @@ pub struct HubModelResolver {
 
 impl HubModelResolver {
     pub fn new(
-        hub: Hub,
+        hub: Arc<Hub>,
         factory: Arc<CheckpointFactory>,
         options: ModelOptions,
         references: IndexMap<String, String>,
@@ -41,7 +41,7 @@ impl ModelResolver for HubModelResolver {
             .get(reference)
             .map(String::as_str)
             .unwrap_or(reference);
-        let pulled = pull_model(&self.hub, reference).map_err(|error| {
+        let pulled = pull_model(self.hub.as_ref(), reference).map_err(|error| {
             ModelError::load(format!("cannot resolve `{reference}`: {error:#}"))
         })?;
         register_checkpoint_bundle(
@@ -82,7 +82,7 @@ mod tests {
         checkpoint(&directory);
 
         let factory = Arc::new(CheckpointFactory::new());
-        let hub = Hub::new(sys1_hub::HubConfig::new(root.join("cache"))).expect("hub");
+        let hub = Arc::new(Hub::new(sys1_hub::HubConfig::new(root.join("cache"))).expect("hub"));
         let mut references = IndexMap::new();
         references.insert(
             "configured".to_owned(),

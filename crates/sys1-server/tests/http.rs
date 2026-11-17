@@ -15,7 +15,10 @@ use sys1_protocol::{
     Answer, ChoiceAnswer, ModelMetadataList, NoulAnswer, Question, ScoreAnswer, State,
     SystemOneResponse, Usage,
 };
-use sys1_server::{BatchConfig, ServerConfig, router, router_with_resolver};
+use sys1_server::{
+    BatchConfig, CacheManager, CachedFile, CachedModel, ServerConfig, router,
+    router_with_extensions, router_with_resolver,
+};
 use tower::ServiceExt;
 
 struct FakeModel;
@@ -167,6 +170,34 @@ fn app_with_resolver(config: ServerConfig, resolver: Option<Arc<dyn ModelResolve
     )
     .expect("registry");
     router_with_resolver(Arc::new(registry), config, resolver)
+}
+
+struct FakeCache {
+    models: Mutex<Vec<CachedModel>>,
+}
+
+impl CacheManager for FakeCache {
+    fn root(&self) -> String {
+        "fake-cache".to_owned()
+    }
+
+    fn list(&self) -> Result<Vec<CachedModel>, String> {
+        Ok(self
+            .models
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone())
+    }
+
+    fn remove(&self, key: &str) -> Result<bool, String> {
+        let mut models = self
+            .models
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = models.len();
+        models.retain(|model| model.key != key);
+        Ok(models.len() != before)
+    }
 }
 
 struct FakeResolver;
@@ -775,6 +806,124 @@ async fn admin_can_populate_an_empty_catalog() {
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let response: SystemOneResponse = serde_json::from_slice(&body).expect("response JSON");
     assert_eq!(response.model, "dynamic-test");
+}
+
+fn cached_model(key: &str, name: &str) -> CachedModel {
+    CachedModel {
+        key: key.to_owned(),
+        name: name.to_owned(),
+        directory: format!("fake-cache/models/{key}"),
+        size_bytes: 42,
+        files: vec![CachedFile {
+            path: "model.bin".to_owned(),
+            size: 42,
+        }],
+    }
+}
+
+#[tokio::test]
+async fn admin_cache_lists_and_removes_entries() {
+    let registry = Arc::new(
+        ModelRegistry::new(
+            vec![manifest("laya-test", &[])],
+            Arc::new(FakeFactory),
+            RegistryConfig::default(),
+        )
+        .expect("registry"),
+    );
+    let cache: Arc<dyn CacheManager> = Arc::new(FakeCache {
+        models: Mutex::new(vec![
+            cached_model("key-a", "laya-test"),
+            cached_model("key-b", "other-model"),
+        ]),
+    });
+    let app = router_with_extensions(
+        registry,
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        None,
+        Some(cache),
+    );
+
+    let (status, _, body) = send(app.clone(), get("/api/cache")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["cache_dir"], "fake-cache");
+    assert_eq!(value["models"].as_array().unwrap().len(), 2);
+    assert_eq!(value["models"][0]["key"], "key-a");
+    assert_eq!(value["models"][0]["size_bytes"], 42);
+
+    // A resident model cannot have its cache deleted underneath it.
+    let (status, _, _) = send(app.clone(), post("/api/models/laya-test/load", "")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, body) = send(app.clone(), delete("/api/cache/key-a")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        String::from_utf8_lossy(&body).contains("is loaded"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let (status, _, _) = send(app.clone(), post("/api/models/laya-test/unload", "")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, body) = send(app.clone(), delete("/api/cache/key-a")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["removed"], true);
+
+    let (status, _, body) = send(app.clone(), delete("/api/cache/key-b")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["removed"], true);
+
+    let (_, _, body) = send(app, get("/api/cache")).await;
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert!(value["models"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cache_api_requires_admin_and_auth() {
+    let cache: Arc<dyn CacheManager> = Arc::new(FakeCache {
+        models: Mutex::new(Vec::new()),
+    });
+    let registry = Arc::new(
+        ModelRegistry::new(Vec::new(), Arc::new(FakeFactory), RegistryConfig::default())
+            .expect("registry"),
+    );
+
+    let app = router_with_extensions(
+        registry.clone(),
+        ServerConfig::default(),
+        None,
+        Some(cache.clone()),
+    );
+    let (status, _, _) = send(app, get("/api/cache")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let app = router_with_extensions(
+        registry,
+        ServerConfig {
+            api_key: Some("secret".to_owned()),
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        None,
+        Some(cache),
+    );
+    let (status, _, _) = send(app.clone(), get("/api/cache")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/cache")
+        .header(header::AUTHORIZATION, "Bearer secret")
+        .body(Body::empty())
+        .expect("request");
+    let (status, _, _) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]

@@ -17,6 +17,8 @@ Strict TypeSafe-compatible System One HTTP server built on axum.
 | `POST` | `/api/models/{name}/reload` | Unload and load again |
 | `POST` | `/api/models` | Add a model from a reference (needs a resolver) |
 | `DELETE` | `/api/models/{name}` | Unload and remove from the live catalog |
+| `GET` | `/api/cache` | List the on-disk model cache (needs a cache manager) |
+| `DELETE` | `/api/cache/{key}` | Remove one cache entry |
 | `GET` | `/metrics` | Prometheus metrics (when enabled) |
 | `GET` | `/api/metrics` | JSON metrics snapshot (when enabled) |
 
@@ -57,6 +59,22 @@ let app = router_with_resolver(
 );
 ```
 
+Add disk-cache management with `router_with_extensions` (or
+`serve_with_extensions`):
+
+```rust
+use std::sync::Arc;
+use sys1_server::{CacheManager, router_with_extensions};
+
+let cache: Arc<dyn CacheManager> = Arc::new(my_cache);
+let app = router_with_extensions(
+    registry,
+    ServerConfig { enable_admin: true, ..ServerConfig::default() },
+    Some(resolver),
+    Some(cache),
+);
+```
+
 ## Runtime model management
 
 - `ModelRegistry::is_loaded` reports residency; `register`/`unregister` mutate
@@ -71,6 +89,12 @@ let app = router_with_resolver(
 - `GET /api/models` reports `origin: "configured" | "runtime"` per model.
 - `DELETE /api/models/{name}` also calls `ModelResolver::release`, allowing the
   resolver to forget local directory mappings.
+- `GET /api/cache` lists cached models (`key`, `name`, `directory`, `size_bytes`,
+  `files`). `DELETE /api/cache/{key}` removes the cache directory and its
+  manifest; a model that is currently resident returns `409` — unload it first.
+  Routes require `enable_admin` and a [`CacheManager`] injected through
+  `router_with_extensions` / `serve_with_extensions`. The CLI wires its hub as
+  the cache manager.
 - Without a resolver, `POST /api/models` returns `501`; load/unload/reload and
   DELETE still work for configured models.
 - Admin requests use the same Bearer key as `/v1/*`. With no key configured the

@@ -107,6 +107,10 @@ curl -X POST http://127.0.0.1:8080/api/models \
   -d '{"reference":"hf:convaiinnovations/laya-multilingual","load":true}'
 curl -X POST http://127.0.0.1:8080/api/models/laya-multilingual/unload
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+
+# 磁盘缓存（key 来自 GET /api/cache）；常驻模型需先 unload。
+curl http://127.0.0.1:8080/api/cache
+curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 ```
 
 `POST /api/models` 接受与 `sys1 pull` 相同的引用，也接受 `sys1.toml` 中
@@ -114,6 +118,10 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 `GET /api/models` 标记每个条目是 `configured` 还是 `runtime`。运行时添加/移除
 的条目不会持久化：重启后以配置中的 `[models]` 为准。已经持有模型句柄的请求会
 正常完成，后续请求会重新触发懒加载。
+
+缓存管理 API 在服务进程内对应 `sys1 list` / `sys1 rm`：`GET /api/cache`
+返回 key、名称、目录、大小与文件；`DELETE /api/cache/{key}` 删除缓存目录与
+manifest。当前常驻的模型返回 `409`，需要先 unload。
 
 ### 指标与预加载
 

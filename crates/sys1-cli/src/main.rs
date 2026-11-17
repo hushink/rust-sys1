@@ -1,7 +1,9 @@
+mod cache;
 mod config;
 mod source;
 
 use anyhow::{Context, bail};
+use cache::HubCacheManager;
 use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
 use config::LoadedConfig;
@@ -25,7 +27,7 @@ use sys1_laya::{
     is_checkpoint_directory, local_checkpoint_manifest, register_checkpoint_bundle, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
-use sys1_server::{BatchConfig, ServerConfig, serve_with_resolver};
+use sys1_server::{BatchConfig, ServerConfig, serve_with_extensions};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -276,7 +278,7 @@ fn serve_command(
     } else {
         server.metrics.unwrap_or(true)
     };
-    let hub = make_hub(cache, offline, config)?;
+    let hub = Arc::new(make_hub(cache, offline, config)?);
     let (manifests, factory) = build_models(&hub, &specs, options.clone())?;
     if manifests.is_empty() {
         if !enable_admin {
@@ -290,11 +292,12 @@ fn serve_command(
         );
     }
     let resolver: Arc<dyn ModelResolver> = Arc::new(HubModelResolver::new(
-        hub,
+        hub.clone(),
         factory.clone(),
         options,
         config.value.models.clone(),
     ));
+    let cache_manager: Arc<dyn sys1_server::CacheManager> = Arc::new(HubCacheManager::new(hub));
     let registry = Arc::new(ModelRegistry::new(
         manifests,
         factory,
@@ -344,11 +347,12 @@ fn serve_command(
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(serve_with_resolver(
+    runtime.block_on(serve_with_extensions(
         bind,
         registry,
         server_config,
         Some(resolver),
+        Some(cache_manager),
     ))?;
     Ok(())
 }

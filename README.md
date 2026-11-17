@@ -111,6 +111,10 @@ curl -X POST http://127.0.0.1:8080/api/models \
   -d '{"reference":"hf:convaiinnovations/laya-multilingual","load":true}'
 curl -X POST http://127.0.0.1:8080/api/models/laya-multilingual/unload
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+
+# Disk cache (keys come from GET /api/cache); unload resident models first.
+curl http://127.0.0.1:8080/api/cache
+curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 ```
 
 `POST /api/models` accepts the same references as `sys1 pull`, plus `[models]`
@@ -120,6 +124,11 @@ a failure rolls back the registration. `GET /api/models` marks each entry as
 configured `[models]` catalog is authoritative after a restart. In-flight
 requests that already hold a model handle finish normally; later requests
 trigger a lazy load again.
+
+The cache admin API mirrors `sys1 list` / `sys1 rm` inside the serving process:
+`GET /api/cache` reports keys, names, directories, sizes, and files;
+`DELETE /api/cache/{key}` removes the cache directory and manifest. A model that
+is currently resident returns `409`, so unload it first.
 
 ### Metrics and preload
 

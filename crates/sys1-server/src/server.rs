@@ -1,4 +1,5 @@
 use crate::body::read_body;
+use crate::cache::{CacheManager, CachedModel};
 use crate::config::{BatchConfig, ServerConfig};
 use crate::error::{ApiError, map_model_error, map_registry_error};
 use crate::metrics::Metrics;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub registry: Arc<ModelRegistry>,
     pub config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
+    cache: Option<Arc<dyn CacheManager>>,
     /// Serializes catalog mutations so add/remove snapshots cannot interleave.
     admin_lock: Arc<tokio::sync::Mutex<()>>,
     metrics: Arc<Metrics>,
@@ -57,6 +59,16 @@ pub fn router_with_resolver(
     registry: Arc<ModelRegistry>,
     config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
+) -> Router {
+    router_with_extensions(registry, config, resolver, None)
+}
+
+/// Build a router with runtime model resolution and/or disk-cache management.
+pub fn router_with_extensions(
+    registry: Arc<ModelRegistry>,
+    config: ServerConfig,
+    resolver: Option<Arc<dyn ModelResolver>>,
+    cache: Option<Arc<dyn CacheManager>>,
 ) -> Router {
     let metrics = Arc::new(Metrics::new());
     let batch = config.batching.as_ref().map(|batch| {
@@ -77,6 +89,11 @@ pub fn router_with_resolver(
             .route("/api/models/{name}/unload", post(admin_unload))
             .route("/api/models/{name}/reload", post(admin_reload))
             .route("/api/models/{name}", delete(admin_remove));
+        if cache.is_some() {
+            app = app
+                .route("/api/cache", get(admin_cache))
+                .route("/api/cache/{key}", delete(admin_cache_remove));
+        }
     }
     if config.enable_metrics {
         app = app
@@ -90,6 +107,7 @@ pub fn router_with_resolver(
             registry,
             config,
             resolver,
+            cache,
             admin_lock: Arc::new(tokio::sync::Mutex::new(())),
             metrics,
             batch,
@@ -202,9 +220,23 @@ pub async fn serve_with_resolver(
     config: ServerConfig,
     resolver: Option<Arc<dyn ModelResolver>>,
 ) -> std::io::Result<()> {
+    serve_with_extensions(addr, registry, config, resolver, None).await
+}
+
+pub async fn serve_with_extensions(
+    addr: SocketAddr,
+    registry: Arc<ModelRegistry>,
+    config: ServerConfig,
+    resolver: Option<Arc<dyn ModelResolver>>,
+    cache: Option<Arc<dyn CacheManager>>,
+) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "sys1 server listening");
-    axum::serve(listener, router_with_resolver(registry, config, resolver)).await
+    axum::serve(
+        listener,
+        router_with_extensions(registry, config, resolver, cache),
+    )
+    .await
 }
 
 async fn systemone(State(state): State<AppState>, request: Request) -> Response {
@@ -646,6 +678,115 @@ async fn admin_reload(
             &request_id,
         ),
     }
+}
+
+#[derive(Serialize)]
+struct CacheList {
+    cache_dir: String,
+    models: Vec<CachedModel>,
+}
+
+#[derive(Serialize)]
+struct CacheRemoveResult {
+    key: String,
+    removed: bool,
+}
+
+async fn admin_cache(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let request_id = Uuid::new_v4().to_string();
+    if let Err(error) = check_auth(&state.config, &headers) {
+        return json_response(error.status, error.body, &request_id);
+    }
+    let Some(cache) = state.cache.clone() else {
+        let error = ApiError::not_implemented("disk cache management is not configured");
+        return json_response(error.status, error.body, &request_id);
+    };
+
+    match tokio::task::spawn_blocking(move || (cache.root(), cache.list())).await {
+        Ok((cache_dir, Ok(models))) => {
+            json_response(StatusCode::OK, CacheList { cache_dir, models }, &request_id)
+        }
+        Ok((_, Err(error))) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorResponse::bad_request(error),
+            &request_id,
+        ),
+        Err(error) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorResponse::bad_request(format!("cache list task failed: {error}")),
+            &request_id,
+        ),
+    }
+}
+
+async fn admin_cache_remove(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let request_id = Uuid::new_v4().to_string();
+    if let Err(error) = check_auth(&state.config, &headers) {
+        return json_response(error.status, error.body, &request_id);
+    }
+    if !valid_cache_key(&key) {
+        return json_response(
+            StatusCode::BAD_REQUEST,
+            ErrorResponse::bad_request("invalid cache key"),
+            &request_id,
+        );
+    }
+    let Some(cache) = state.cache.clone() else {
+        let error = ApiError::not_implemented("disk cache management is not configured");
+        return json_response(error.status, error.body, &request_id);
+    };
+
+    let admin_lock = state.admin_lock.clone();
+    let _admin_guard = admin_lock.lock().await;
+    let registry = state.registry.clone();
+    let remove_key = key.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let models = cache.list()?;
+        if let Some(entry) = models.iter().find(|entry| entry.key == remove_key)
+            && registry.is_loaded(&entry.name)
+        {
+            return Ok::<_, String>((false, Some(entry.name.clone())));
+        }
+        cache.remove(&remove_key).map(|removed| (removed, None))
+    })
+    .await;
+
+    match result {
+        Ok(Ok((_, Some(model)))) => {
+            let error = ApiError::conflict(format!(
+                "model `{model}` is loaded; unload it before removing the cache"
+            ));
+            json_response(error.status, error.body, &request_id)
+        }
+        Ok(Ok((removed, None))) => json_response(
+            StatusCode::OK,
+            CacheRemoveResult { key, removed },
+            &request_id,
+        ),
+        Ok(Err(error)) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorResponse::bad_request(error),
+            &request_id,
+        ),
+        Err(error) => json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorResponse::bad_request(format!("cache removal task failed: {error}")),
+            &request_id,
+        ),
+    }
+}
+
+fn valid_cache_key(key: &str) -> bool {
+    !key.is_empty()
+        && key != "."
+        && key != ".."
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
 }
 
 async fn admin_add_model(State(state): State<AppState>, request: Request) -> Response {

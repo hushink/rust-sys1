@@ -76,6 +76,8 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 | `POST` | `/api/models/{name}/reload` | 卸载后重新加载 |
 | `POST` | `/api/models` | 解析引用并加入运行时目录 |
 | `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
+| `GET` | `/api/cache` | 列出缓存模型、key、大小与文件 |
+| `DELETE` | `/api/cache/{key}` | 从磁盘删除一个缓存条目 |
 
 ```bash
 curl http://127.0.0.1:8080/api/models
@@ -84,6 +86,10 @@ curl -X POST http://127.0.0.1:8080/api/models \
   -H 'Content-Type: application/json' \
   -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+
+# 磁盘缓存：先列出 key，再按 key 删除；常驻模型需先 unload，否则返回 409。
+curl http://127.0.0.1:8080/api/cache
+curl -X DELETE http://127.0.0.1:8080/api/cache/<key>
 ```
 
 添加引用时会通过 hub 物化模型（已缓存则直接使用），并立即对

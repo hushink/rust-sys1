@@ -162,6 +162,32 @@ impl Hub {
         Ok(removed)
     }
 
+    /// Remove a cached model by its cache key (the directory name shown by
+    /// [`Hub::list_cached`]).
+    ///
+    /// The key is validated against path traversal before any filesystem
+    /// operation.
+    pub fn remove_cached(&self, key: &str) -> Result<bool, HubError> {
+        if !is_cache_key(key) {
+            return Err(HubError::InvalidData {
+                url: key.to_owned(),
+                message: "invalid model cache key".to_owned(),
+            });
+        }
+        let directory = self.config.cache_dir.join("models").join(key);
+        let removed = if directory.is_dir() {
+            fs::remove_dir_all(&directory).map_err(|error| HubError::io(&directory, error))?;
+            true
+        } else {
+            false
+        };
+        let manifest = self.cache_manifest_path(key);
+        if manifest.is_file() {
+            fs::remove_file(&manifest).map_err(|error| HubError::io(&manifest, error))?;
+        }
+        Ok(removed)
+    }
+
     /// List models present in the local cache.
     pub fn list_cached(&self) -> Result<Vec<PulledModel>, HubError> {
         let models_dir = self.config.cache_dir.join("models");
@@ -272,6 +298,15 @@ impl Hub {
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }
+}
+
+fn is_cache_key(key: &str) -> bool {
+    !key.is_empty()
+        && key != "."
+        && key != ".."
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
 }
 
 fn write_manifest(directory: &Path, manifest: &ModelManifest) -> Result<(), HubError> {

@@ -17,6 +17,8 @@
 | `POST` | `/api/models/{name}/reload` | 卸载后重新加载 |
 | `POST` | `/api/models` | 从引用添加模型（需要 resolver） |
 | `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
+| `GET` | `/api/cache` | 列出磁盘模型缓存（需要 cache manager） |
+| `DELETE` | `/api/cache/{key}` | 删除一个缓存条目 |
 | `GET` | `/metrics` | Prometheus 指标（启用时） |
 | `GET` | `/api/metrics` | JSON 指标快照（启用时） |
 
@@ -57,6 +59,22 @@ let app = router_with_resolver(
 );
 ```
 
+需要磁盘缓存管理时使用 `router_with_extensions`（或
+`serve_with_extensions`）：
+
+```rust
+use std::sync::Arc;
+use sys1_server::{CacheManager, router_with_extensions};
+
+let cache: Arc<dyn CacheManager> = Arc::new(my_cache);
+let app = router_with_extensions(
+    registry,
+    ServerConfig { enable_admin: true, ..ServerConfig::default() },
+    Some(resolver),
+    Some(cache),
+);
+```
+
 ## 运行时模型管理
 
 - `ModelRegistry::is_loaded` 查询常驻状态；`register` / `unregister` 修改运行时
@@ -69,6 +87,11 @@ let app = router_with_resolver(
 - `GET /api/models` 为每个模型输出 `origin: "configured" | "runtime"`。
 - `DELETE /api/models/{name}` 还会调用 `ModelResolver::release`，让 resolver
   清理本地目录映射。
+- `GET /api/cache` 列出缓存模型（`key`、`name`、`directory`、`size_bytes`、
+  `files`）。`DELETE /api/cache/{key}` 删除缓存目录与 manifest；正在常驻的模型
+  返回 `409`，需先 unload。路由要求 `enable_admin`，并通过
+  `router_with_extensions` / `serve_with_extensions` 注入 [`CacheManager`]；
+  CLI 用 hub 实现该接口。
 - 未配置 resolver 时，`POST /api/models` 返回 `501`；已配置模型的
   load/unload/reload 和 DELETE 仍可用。
 - admin 请求与 `/v1/*` 使用同一个 Bearer key。未配置 key 时 admin API 是开放的，
