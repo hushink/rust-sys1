@@ -89,7 +89,9 @@ Use `--preload laya-latest` (repeatable) or `[server] preload` to load models
 before the listener starts. `/metrics` (Prometheus) and `/api/metrics` (JSON)
 are enabled by default; `--no-metrics` disables them. Logs default to text on
 stdout; use `--log-format json`, `--log-file`, and `--log-level` to change the
-sink.
+sink. `Ctrl-C` / `SIGTERM` drain in-flight requests before exit. CORS is
+permissive by default; restrict it with `--cors-origin` / `[server] cors_origins`
+or disable it with `--no-cors` / `cors_origins = []`.
 
 ### Runtime model management
 
@@ -218,6 +220,7 @@ cache_dir = "D:/models/sys1-cache"  # model download/cache directory
 # log_level = "info"
 # log_format = "text"          # text | json
 # log_file = "logs/sys1.log"   # append instead of stdout
+# cors_origins = ["https://app.example"]  # [] disables CORS; omit = permissive
 
 [models]
 laya-latest = "local:D:/models/laya"       # local model directory

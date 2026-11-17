@@ -32,7 +32,7 @@ use sys1_laya::{
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{
     BatchConfig, ConfigReloader, ServerConfig, ServerExtensions, TracingTelemetry,
-    serve_with_extensions,
+    serve_with_extensions_and_shutdown,
 };
 
 #[derive(Parser)]
@@ -131,6 +131,12 @@ struct ServeArgs {
     /// Load these models before serving (repeatable). Overrides [server] preload.
     #[arg(long = "preload", value_name = "NAME")]
     preload: Vec<String>,
+    /// Allowed CORS origin (repeatable). Overrides [server] cors_origins.
+    #[arg(long = "cors-origin", value_name = "ORIGIN")]
+    cors_origins: Vec<String>,
+    /// Disable CORS headers entirely.
+    #[arg(long, conflicts_with = "cors_origins")]
+    no_cors: bool,
 }
 
 #[derive(clap::Args)]
@@ -362,17 +368,25 @@ fn serve_command(
             "the model management/metrics APIs are enabled without an API key; keep the bind address private"
         );
     }
+    let cors_origins = if args.no_cors {
+        Some(Vec::new())
+    } else if !args.cors_origins.is_empty() {
+        Some(args.cors_origins.clone())
+    } else {
+        server.cors_origins.clone()
+    };
     let server_config = ServerConfig {
         api_key,
         batching,
         enable_admin,
         enable_metrics,
+        cors_origins,
         ..ServerConfig::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(serve_with_extensions(
+    runtime.block_on(serve_with_extensions_and_shutdown(
         bind,
         registry,
         server_config,
@@ -382,8 +396,28 @@ fn serve_command(
             reload: reloader,
             telemetry: Some(Arc::new(TracingTelemetry)),
         },
+        shutdown_signal(),
     ))?;
+    tracing::info!("server stopped");
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+    tracing::info!("shutdown signal received; draining in-flight requests");
 }
 
 fn run_command(

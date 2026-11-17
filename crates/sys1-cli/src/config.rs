@@ -66,6 +66,8 @@ pub struct ServerSection {
     pub log_format: Option<String>,
     /// Append logs to this file instead of stdout. Relative to this config.
     pub log_file: Option<PathBuf>,
+    /// CORS allowlist. Omit for permissive; `[]` disables CORS.
+    pub cors_origins: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -211,6 +213,7 @@ mod tests {
             log_level = "debug"
             log_format = "json"
             log_file = "logs/sys1.log"
+            cors_origins = ["https://app.example"]
 
             [models]
             laya-latest = "local:D:/models/laya"
@@ -224,6 +227,10 @@ mod tests {
         assert_eq!(
             config.server.log_file.as_deref(),
             Some(std::path::Path::new("logs/sys1.log"))
+        );
+        assert_eq!(
+            config.server.cors_origins.as_deref(),
+            Some(&["https://app.example".to_owned()][..])
         );
         assert_eq!(
             config.models.get("laya-latest").map(String::as_str),

@@ -16,7 +16,8 @@ pub use config::{BatchConfig, ServerConfig};
 pub use reload::{ConfigReload, ConfigReloader, ReloadError};
 pub use server::{
     AppState, ServerExtensions, router, router_with_extensions, router_with_resolver, serve,
-    serve_with_extensions, serve_with_resolver,
+    serve_listener_with_extensions_and_shutdown, serve_with_extensions,
+    serve_with_extensions_and_shutdown, serve_with_resolver,
 };
 pub use telemetry::{
     BatchEvent, CacheAction, CacheEvent, ConfigEvent, ModelAction, ModelEvent, NoopTelemetry,

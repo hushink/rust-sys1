@@ -176,6 +176,12 @@ trace id 会保留；服务端生成新的 64-bit span id，并保留 sampled �
 - `box` / `assets` 会被解析，但 Laya 不支持：`422 unsupported`。
 - box/assets 缺少 `TypeSafe-Danger-Zone-Images: true` 时返回 `400`。
 - 超长 state 返回 `400 max_tokens_exceeded`。
+- CORS 默认 permissive。`ServerConfig::cors_origins = Some(vec![...])` 限制来源；
+  `Some(Vec::new())` 关闭 CORS 头。允许 GET/POST/DELETE/OPTIONS；请求头包含
+  content-type、authorization、`TypeSafe-Danger-Zone-Images`、`traceparent`。
+- `serve_with_extensions_and_shutdown` /
+  `serve_listener_with_extensions_and_shutdown` 在 shutdown future 完成时停止接收
+  新连接并等待在途请求结束。CLI 将 Ctrl-C 与 SIGTERM 接入该路径。
 - 推理与模型加载在 `tokio::task::spawn_blocking` 中执行。
 - 默认启用跨请求 batching：`ServerConfig::batching` 中的
   `BatchConfig { max_batch: 32, max_wait: 2 ms }`。设为 `None` 可关闭。

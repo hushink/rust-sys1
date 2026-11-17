@@ -1289,6 +1289,50 @@ async fn config_reload_requires_admin_and_a_reloader() {
 }
 
 #[tokio::test]
+async fn cors_can_be_permissive_restricted_or_disabled() {
+    let request = |origin: &str| {
+        Request::builder()
+            .method("GET")
+            .uri("/health")
+            .header(header::ORIGIN, origin)
+            .body(Body::empty())
+            .expect("request")
+    };
+
+    let (_, headers, _) = send(app(ServerConfig::default()), request("https://app.example")).await;
+    assert_eq!(
+        headers
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("*")
+    );
+
+    let restricted = app(ServerConfig {
+        cors_origins: Some(vec!["https://app.example".to_owned()]),
+        ..ServerConfig::default()
+    });
+    let (_, headers, _) = send(restricted.clone(), request("https://app.example")).await;
+    assert_eq!(
+        headers
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("https://app.example")
+    );
+    let (_, headers, _) = send(restricted, request("https://evil.example")).await;
+    assert!(
+        headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none(),
+        "disallowed origin received CORS headers"
+    );
+
+    let disabled = app(ServerConfig {
+        cors_origins: Some(Vec::new()),
+        ..ServerConfig::default()
+    });
+    let (_, headers, _) = send(disabled, request("https://app.example")).await;
+    assert!(headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_none());
+}
+
+#[tokio::test]
 async fn metrics_are_disabled_by_default() {
     let app = app(ServerConfig::default());
     let (status, _, _) = send(app.clone(), get("/api/metrics")).await;

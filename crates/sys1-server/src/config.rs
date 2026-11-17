@@ -33,6 +33,9 @@ pub struct ServerConfig {
     /// Expose `/metrics` (Prometheus) and `/api/metrics` (JSON). Disabled by
     /// default for embedded servers.
     pub enable_metrics: bool,
+    /// CORS origins. `None` keeps the permissive default; `Some(list)` restricts
+    /// to those origins; `Some(empty)` disables CORS headers.
+    pub cors_origins: Option<Vec<String>>,
 }
 
 impl Default for ServerConfig {
@@ -43,6 +46,7 @@ impl Default for ServerConfig {
             batching: Some(BatchConfig::default()),
             enable_admin: false,
             enable_metrics: false,
+            cors_origins: None,
         }
     }
 }

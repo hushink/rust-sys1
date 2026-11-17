@@ -95,7 +95,9 @@ let tone = output.answers.choice("tone")?; // 类型化读取
   - 422：`{"detail": [{"loc": [string|int], "msg": string, "type": string, "input"?: ..., "ctx"?: ...}]}`
   - 其他：401、413、415、429、529。
 - 传输规则：32 MiB、UTF-8 无 BOM、嵌套 ≤64、有限数字、gzip/zstd 单层。
-- 响应头包含 `x-typesafe-request-id`；`/health` 位于 `/v1` 之外。
+- 响应头包含 `x-typesafe-request-id` 与 W3C `traceparent`；`/health` 位于 `/v1` 之外。
+- CORS 默认 permissive；`ServerConfig::cors_origins` 可设 allowlist，空列表关闭。允许 GET/POST/DELETE/OPTIONS，请求头含 content-type、authorization、danger-zone 与 traceparent。
+- 优雅关闭：`serve_*_and_shutdown` 在 shutdown future 完成时停止接收并等待在途请求；CLI 接入 Ctrl-C/SIGTERM。
 - Bearer 可选：配置了 key 就强制校验；未配置则接受任意/无 key；非 loopback 绑定且未配置 key 时告警。
 - 未知模型返回 400 `{detail: ...}`。
 - `/v1/*` 不输出 Laya 私有字段；扩展字段放到 `/api/*` 或响应头（后续）。
@@ -187,6 +189,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - admin 开启时，CLI 额外提供 `/api/cache`（列出 key/大小/文件）与 `DELETE /api/cache/{key}`，与 `sys1 list`/`rm` 对齐。
 - 日志：`--log-level`、`--log-format text|json`、`--log-file`，或 `SYS1_LOG_*` / `[server] log_*`；库不安装 subscriber，CLI 负责初始化。
 - 热加载：`POST /api/config/reload` 重读 TOML；仅 `[models]` 增删可应用，其他变更提示重启。
+- 运维收尾：`--cors-origin` / `--no-cors` / `[server] cors_origins`；Ctrl-C/SIGTERM 优雅关闭。
 - 二进制名暂定 `sys1`。
 
 ## 9. 验收
@@ -219,6 +222,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - Engine 开销基准（CPU F32 multilingual，30 次交替）：直接推理 121.7 ms 均值、engine 122.6 ms，约 0.9 ms（<1%）；无需进一步优化 manifest 克隆。
 - 可替换 telemetry 与 trace context 已实现：`Telemetry` 事件、`TracingTelemetry`、`ServerExtensions` 注入、`traceparent` 响应头；CLI text/JSON/文件日志。测试覆盖自定义 telemetry、trace id 透传、batch 事件与 JSON 日志文件。
 - 配置热加载已实现：CLI 只应用 `[models]` 增删，新增项标记 `configured`；server 设置/引用变化 409，解析失败 400 且不改目录。真实进程验证 add 92 ms、remove、restart-required 409。
+- 生产收尾：CORS allowlist/关闭与优雅关闭已实现并有测试；CLI Ctrl-C/SIGTERM 停止接收并 drain。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
 - 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。

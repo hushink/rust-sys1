@@ -61,6 +61,8 @@ Useful flags:
 --log-level <filter>       # or SYS1_LOG_LEVEL / RUST_LOG
 --log-format text|json     # or SYS1_LOG_FORMAT
 --log-file <file>          # or SYS1_LOG_FILE; append instead of stdout
+--cors-origin <origin>     # allowlist; repeatable, overrides config
+--no-cors                  # disable CORS headers
 --offline
 --cache <dir>              # or SYS1_CACHE
 ```
@@ -119,6 +121,11 @@ counters, batch size/latency, model load/unload counts, per-model request counts
 and currently resident models. Preloaded models are already resident when the
 HTTP metrics start, so they do not increment `model load` counters.
 
+`Ctrl-C` / `SIGTERM` trigger graceful shutdown: the listener stops accepting,
+in-flight requests drain, then the process exits. CORS defaults to permissive;
+use `--cors-origin` (repeatable), `--no-cors`, or `[server] cors_origins` to
+restrict or disable it.
+
 ## Config reload
 
 `POST /api/config/reload` reloads the TOML file passed with `--config` (or the
@@ -152,6 +159,7 @@ preload = ["laya-latest"]
 log_level = "info"
 log_format = "text"          # text | json
 # log_file = "logs/sys1.log"
+# cors_origins = ["https://app.example"]  # [] disables CORS; omit = permissive
 
 [models]
 laya-latest = "local:D:/models/laya"

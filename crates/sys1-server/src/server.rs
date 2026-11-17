@@ -12,7 +12,8 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Extension, Path, Request, State};
 use axum::http::{
-    HeaderMap, HeaderName, HeaderValue, StatusCode, header::AUTHORIZATION, header::CONTENT_TYPE,
+    HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::AUTHORIZATION,
+    header::CONTENT_TYPE,
 };
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -30,7 +31,7 @@ use sys1_protocol::{
     SYSTEMONE_PATH, State as WireState, SystemOneRequest, SystemOneResponse, parse_request_slice,
 };
 use tokio::sync::{mpsc, oneshot};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -144,8 +145,10 @@ pub fn router_with_extensions(
             .route("/api/metrics", get(metrics_json));
     }
 
-    app.layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
+    if let Some(cors) = cors_layer(config.cors_origins.as_deref()) {
+        app = app.layer(cors);
+    }
+    app.layer(TraceLayer::new_for_http())
         .layer(axum::middleware::from_fn(trace_context_layer))
         .with_state(AppState {
             registry,
@@ -158,6 +161,40 @@ pub fn router_with_extensions(
             telemetry,
             batch,
         })
+}
+
+fn cors_layer(origins: Option<&[String]>) -> Option<CorsLayer> {
+    let Some(origins) = origins else {
+        return Some(CorsLayer::permissive());
+    };
+    if origins.is_empty() {
+        return None;
+    }
+    let values = origins
+        .iter()
+        .filter_map(|origin| match origin.parse::<HeaderValue>() {
+            Ok(value) => Some(value),
+            Err(error) => {
+                tracing::warn!(%origin, %error, "invalid CORS origin ignored");
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        tracing::warn!("no valid CORS origins configured; CORS is disabled");
+        return None;
+    }
+    Some(
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::list(values))
+            .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+            .allow_headers([
+                CONTENT_TYPE,
+                AUTHORIZATION,
+                HeaderName::from_static("typesafe-danger-zone-images"),
+                HeaderName::from_static(TRACEPARENT_HEADER),
+            ]),
+    )
 }
 
 async fn trace_context_layer(mut request: Request, next: axum::middleware::Next) -> Response {
@@ -304,12 +341,44 @@ pub async fn serve_with_extensions(
     config: ServerConfig,
     extensions: ServerExtensions,
 ) -> std::io::Result<()> {
+    serve_with_extensions_and_shutdown(addr, registry, config, extensions, std::future::pending())
+        .await
+}
+
+/// Like [`serve_with_extensions`], but stops accepting new connections and
+/// waits for in-flight requests when `shutdown` resolves.
+pub async fn serve_with_extensions_and_shutdown<F>(
+    addr: SocketAddr,
+    registry: Arc<ModelRegistry>,
+    config: ServerConfig,
+    extensions: ServerExtensions,
+    shutdown: F,
+) -> std::io::Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "sys1 server listening");
+    serve_listener_with_extensions_and_shutdown(listener, registry, config, extensions, shutdown)
+        .await
+}
+
+/// Serve on an already-bound listener with graceful shutdown.
+pub async fn serve_listener_with_extensions_and_shutdown<F>(
+    listener: tokio::net::TcpListener,
+    registry: Arc<ModelRegistry>,
+    config: ServerConfig,
+    extensions: ServerExtensions,
+    shutdown: F,
+) -> std::io::Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
     axum::serve(
         listener,
         router_with_extensions(registry, config, extensions),
     )
+    .with_graceful_shutdown(shutdown)
     .await
 }
 

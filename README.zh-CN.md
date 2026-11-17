@@ -86,7 +86,9 @@ token 默认启用精确 local-window attention；`--no-local-window` 退回 eag
 用 `--preload laya-latest`（可重复）或 `[server] preload` 在监听端口前加载模型。
 `/metrics`（Prometheus）与 `/api/metrics`（JSON）默认开启，`--no-metrics` 关闭。
 日志默认 text 输出到 stdout；可用 `--log-format json`、`--log-file`、
-`--log-level` 调整。
+`--log-level` 调整。`Ctrl-C` / `SIGTERM` 会等待在途请求结束后退出。CORS 默认
+permissive；用 `--cors-origin` / `[server] cors_origins` 限制，或用 `--no-cors` /
+`cors_origins = []` 关闭。
 
 ### 运行时模型管理
 
@@ -206,6 +208,7 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 # log_level = "info"
 # log_format = "text"          # text | json
 # log_file = "logs/sys1.log"   # 追加到文件而非 stdout
+# cors_origins = ["https://app.example"]  # [] 关闭 CORS；省略为 permissive
 
 [models]
 laya-latest = "local:D:/models/laya"       # 本地模型目录

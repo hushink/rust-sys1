@@ -61,6 +61,8 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --log-level <filter>       # 或 SYS1_LOG_LEVEL / RUST_LOG
 --log-format text|json     # 或 SYS1_LOG_FORMAT
 --log-file <file>          # 或 SYS1_LOG_FILE；追加到文件而非 stdout
+--cors-origin <origin>     # 允许来源，可重复，覆盖配置
+--no-cors                  # 关闭 CORS 头
 --offline
 --cache <dir>              # 或 SYS1_CACHE
 ```
@@ -113,6 +115,10 @@ CLI 默认开启 `/metrics`（Prometheus）与 `/api/metrics`（JSON）；`--no-
 JSON 包含请求/错误/延迟、batch 大小与耗时、模型加载/卸载、按模型请求数以及
 当前常驻模型。预加载模型在 HTTP 指标启动前已常驻，因此不会增加模型加载计数。
 
+`Ctrl-C` / `SIGTERM` 触发优雅关闭：停止接收新连接、等待在途请求结束再退出。
+CORS 默认 permissive；用 `--cors-origin`（可重复）、`--no-cors` 或
+`[server] cors_origins` 限制或关闭。
+
 ## 配置热加载
 
 `POST /api/config/reload` 重读 `--config` 指定（或自动加载）的 `sys1.toml`，
@@ -143,6 +149,7 @@ preload = ["laya-latest"]
 log_level = "info"
 log_format = "text"          # text | json
 # log_file = "logs/sys1.log"
+# cors_origins = ["https://app.example"]  # [] 关闭 CORS；省略为 permissive
 
 [models]
 laya-latest = "local:D:/models/laya"

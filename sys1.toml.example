@@ -35,6 +35,7 @@ cache_dir = "D:/models/sys1-cache"
 # log_level = "info"           # tracing filter; RUST_LOG is also honored
 # log_format = "text"          # text | json
 # log_file = "sys1.log"        # append to a file instead of stdout
+# cors_origins = ["https://app.example"]  # [] disables CORS; omit = permissive
 
 # Serving model catalog. Keys are the names clients pass to /v1/systemone.
 # Values are ModelRefs: local:/path, hf:owner/repo, modelscope:..., or a

@@ -186,6 +186,14 @@ request/model/cache telemetry events and in the `systemone` tracing span.
 - `box` / `assets` are parsed but unsupported by Laya: `422 unsupported`.
 - Missing `TypeSafe-Danger-Zone-Images: true` for box/assets returns `400`.
 - Long state returns `400 max_tokens_exceeded`.
+- CORS defaults to permissive. `ServerConfig::cors_origins = Some(vec![...])`
+  restricts origins; `Some(Vec::new())` disables CORS headers. Allowed methods
+  are GET/POST/DELETE/OPTIONS; headers include content-type, authorization,
+  `TypeSafe-Danger-Zone-Images`, and `traceparent`.
+- `serve_with_extensions_and_shutdown` /
+  `serve_listener_with_extensions_and_shutdown` stop accepting new connections
+  and drain in-flight requests when the shutdown future resolves. The CLI wires
+  Ctrl-C and SIGTERM into this path.
 - Inference and model loading run in `tokio::task::spawn_blocking`.
 - Cross-request batching is enabled by default: `ServerConfig::batching` carries
   a `BatchConfig { max_batch: 32, max_wait: 2 ms }`. Set `batching: None` to
