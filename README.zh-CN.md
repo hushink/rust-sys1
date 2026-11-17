@@ -80,6 +80,36 @@ sys1 serve --bind 0.0.0.0:8080 --api-key secret \
 `--dtype f16` 是最高吞吐模式；`--tf32` 是可选的 F32 加速。CUDA 上 state ≥512
 token 默认启用精确 local-window attention；`--no-local-window` 退回 eager。
 
+### 配置
+
+部署相关配置都可以放到 `sys1.toml`，代码里只保留内置默认值。优先级：
+**CLI > 环境变量 > `sys1.toml` > 内置默认值**。使用 `--config <file>` 或
+`SYS1_CONFIG`；当前目录存在 `sys1.toml` 时自动加载。示例见
+[`sys1.toml.example`](sys1.toml.example)。
+
+```toml
+[hub]
+cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
+# hf_endpoint = "https://huggingface.co"
+# modelscope_endpoint = "https://modelscope.cn"
+
+[server]
+# bind = "127.0.0.1:8080"
+# device = "cuda:0"
+# dtype = "f16"
+# batch_max = 32
+# batch_wait_ms = 2
+# local_window = true
+
+[models]
+laya-latest = "local:D:/models/laya"       # 本地模型目录
+# laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+```
+
+配置文件中的相对路径按配置文件所在目录解析。`[models]` 中的名称可用于
+`serve`、`run`、`pull`、`show`、`rm`。凭据建议通过 `HF_TOKEN`、
+`MODELSCOPE_API_TOKEN`、`SYS1_HUB_TOKEN` 环境变量提供。
+
 ### 调用
 
 ```bash

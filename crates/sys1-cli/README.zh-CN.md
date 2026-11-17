@@ -57,6 +57,28 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --cache <dir>              # 或 SYS1_CACHE
 ```
 
+## 配置
+
+`--config <file>` 或 `SYS1_CONFIG` 加载 TOML 配置；当前目录存在 `sys1.toml`
+时自动加载。优先级：CLI > 环境变量 > 配置文件 > 内置默认值。
+
+```toml
+[hub]
+cache_dir = "D:/models/sys1-cache"
+
+[server]
+device = "cuda:0"
+dtype = "f16"
+batch_max = 32
+
+[models]
+laya-latest = "local:D:/models/laya"
+laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+```
+
+完整示例见 [`sys1.toml.example`](../../sys1.toml.example)。相对 local 路径按
+配置文件所在目录解析；`[models]` 中的名称也可用于 `pull`、`show`、`rm`、`run`。
+
 ## 压测工具
 
 ```bash

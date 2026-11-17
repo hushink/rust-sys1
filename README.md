@@ -82,6 +82,37 @@ Cross-request batching is enabled by default (`--batch-max 32
 lower-risk F32 speedup. Exact local-window attention is on by default for CUDA
 states of at least 512 tokens; use `--no-local-window` for the eager baseline.
 
+### Configuration
+
+All deployment-specific values can live in `sys1.toml`; code contains only
+built-in defaults. Precedence is **CLI > environment > `sys1.toml` > defaults**.
+Use `--config <file>` or `SYS1_CONFIG`; `./sys1.toml` is loaded automatically
+when present. See [`sys1.toml.example`](sys1.toml.example).
+
+```toml
+[hub]
+cache_dir = "D:/models/sys1-cache"  # model download/cache directory
+# hf_endpoint = "https://huggingface.co"
+# modelscope_endpoint = "https://modelscope.cn"
+
+[server]
+# bind = "127.0.0.1:8080"
+# device = "cuda:0"
+# dtype = "f16"
+# batch_max = 32
+# batch_wait_ms = 2
+# local_window = true
+
+[models]
+laya-latest = "local:D:/models/laya"       # local model directory
+# laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+```
+
+Relative paths in the file resolve from the config file's directory.
+`[models]` names are usable by `serve`, `run`, `pull`, `show`, and `rm`.
+Credentials are preferably supplied through `HF_TOKEN`,
+`MODELSCOPE_API_TOKEN`, and `SYS1_HUB_TOKEN`.
+
 ### Call the API
 
 ```bash

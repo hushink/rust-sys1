@@ -1,6 +1,9 @@
+mod config;
+
 use anyhow::{Context, bail};
 use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
+use config::LoadedConfig;
 use indexmap::IndexMap;
 use std::collections::HashSet;
 use std::fs;
@@ -28,6 +31,9 @@ use tracing_subscriber::EnvFilter;
 struct Cli {
     #[arg(long, global = true, env = "SYS1_CACHE", value_name = "DIR")]
     cache: Option<PathBuf>,
+    /// Config file (default: ./sys1.toml when present).
+    #[arg(long, global = true, env = "SYS1_CONFIG", value_name = "FILE")]
+    config: Option<PathBuf>,
     #[arg(long, global = true)]
     offline: bool,
     #[command(subcommand)]
@@ -54,26 +60,30 @@ enum Command {
 
 #[derive(clap::Args)]
 struct ServeArgs {
-    #[arg(long, default_value = "127.0.0.1:8080")]
-    bind: SocketAddr,
+    /// Bind address (default: 127.0.0.1:8080).
+    #[arg(long)]
+    bind: Option<SocketAddr>,
     #[arg(long, env = "SYS1_API_KEY")]
     api_key: Option<String>,
     #[arg(long = "model", value_name = "NAME=REF")]
     models: Vec<String>,
-    #[arg(long, default_value = "auto")]
-    device: String,
-    #[arg(long, default_value = "auto")]
-    dtype: String,
+    /// Device: auto, cpu, cuda:N, or metal (default: auto).
+    #[arg(long)]
+    device: Option<String>,
+    /// Dtype: auto, f32, f16, or bf16 (default: auto).
+    #[arg(long)]
+    dtype: Option<String>,
     #[arg(long)]
     max_len: Option<usize>,
-    #[arg(long, default_value = "typesafe")]
-    laya_confidence: String,
+    /// Confidence mode: typesafe or laya (default: typesafe).
+    #[arg(long)]
+    laya_confidence: Option<String>,
     /// Maximum requests per model forward pass (default: 32).
-    #[arg(long, default_value_t = 32)]
-    batch_max: usize,
+    #[arg(long)]
+    batch_max: Option<usize>,
     /// Maximum wait to collect a batch, in milliseconds (default: 2).
-    #[arg(long, default_value_t = 2)]
-    batch_wait_ms: u64,
+    #[arg(long)]
+    batch_wait_ms: Option<u64>,
     /// Disable cross-request batching.
     #[arg(long)]
     no_batch: bool,
@@ -105,14 +115,17 @@ struct RunArgs {
     reference: String,
     #[arg(long, value_name = "FILE", default_value = "-")]
     input: String,
-    #[arg(long, default_value = "auto")]
-    device: String,
-    #[arg(long, default_value = "auto")]
-    dtype: String,
+    /// Device: auto, cpu, cuda:N, or metal (default: auto).
+    #[arg(long)]
+    device: Option<String>,
+    /// Dtype: auto, f32, f16, or bf16 (default: auto).
+    #[arg(long)]
+    dtype: Option<String>,
     #[arg(long)]
     max_len: Option<usize>,
-    #[arg(long, default_value = "typesafe")]
-    laya_confidence: String,
+    /// Confidence mode: typesafe or laya (default: typesafe).
+    #[arg(long)]
+    laya_confidence: Option<String>,
     /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
     #[arg(long)]
     tf32: bool,
@@ -139,16 +152,18 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let cache = cli.cache.clone();
     let offline = cli.offline;
+    let config = config::load(cli.config.as_deref())?;
     match cli.command {
-        Command::Serve(args) => serve_command(cache.as_deref(), offline, args),
+        Command::Serve(args) => serve_command(cache.as_deref(), offline, &config, args),
         Command::Pull(args) => {
-            let hub = make_hub(cache.as_deref(), offline)?;
-            let pulled = pull_model(&hub, &args.reference)?;
+            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let reference = config.model_reference(&args.reference);
+            let pulled = pull_model(&hub, &reference)?;
             println!("{} -> {}", pulled.manifest.name, pulled.directory.display());
             Ok(())
         }
         Command::List => {
-            let hub = make_hub(cache.as_deref(), offline)?;
+            let hub = make_hub(cache.as_deref(), offline, &config)?;
             for model in hub.list_cached()? {
                 println!(
                     "{:<28} {:<10} {:<12} {}",
@@ -161,75 +176,119 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Show(args) => {
-            let hub = make_hub(cache.as_deref(), offline)?;
-            let manifest = hub.resolve(&args.reference)?;
+            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let reference = config.model_reference(&args.reference);
+            let manifest = hub.resolve(&reference)?;
             println!("{}", serde_json::to_string_pretty(&manifest)?);
             Ok(())
         }
         Command::Rm(args) => {
-            let hub = make_hub(cache.as_deref(), offline)?;
-            let location = hub.cache_location(&args.reference)?;
-            if hub.remove(&args.reference)? {
+            let hub = make_hub(cache.as_deref(), offline, &config)?;
+            let reference = config.model_reference(&args.reference);
+            let location = hub.cache_location(&reference)?;
+            if hub.remove(&reference)? {
                 println!("removed {}", location.display());
             } else {
                 println!("not cached: {}", location.display());
             }
             Ok(())
         }
-        Command::Run(args) => run_command(cache.as_deref(), offline, args),
-        Command::Doctor(args) => doctor_command(cache.as_deref(), offline, args),
+        Command::Run(args) => run_command(cache.as_deref(), offline, &config, args),
+        Command::Doctor(args) => doctor_command(cache.as_deref(), offline, &config, args),
     }
 }
 
-fn serve_command(cache: Option<&Path>, offline: bool, args: ServeArgs) -> anyhow::Result<()> {
-    set_tf32(args.tf32);
-    let options = make_laya_options(
-        &args.device,
-        &args.dtype,
-        args.max_len,
-        &args.laya_confidence,
-        !args.no_local_window,
-    )?;
+fn serve_command(
+    cache: Option<&Path>,
+    offline: bool,
+    config: &LoadedConfig,
+    args: ServeArgs,
+) -> anyhow::Result<()> {
+    let server = &config.value.server;
+    let bind = args
+        .bind
+        .or(server.bind)
+        .unwrap_or_else(|| "127.0.0.1:8080".parse().expect("valid default bind"));
+    let device = args
+        .device
+        .or_else(|| server.device.clone())
+        .unwrap_or_else(|| "auto".to_owned());
+    let dtype = args
+        .dtype
+        .or_else(|| server.dtype.clone())
+        .unwrap_or_else(|| "auto".to_owned());
+    let confidence = args
+        .laya_confidence
+        .or_else(|| server.laya_confidence.clone())
+        .unwrap_or_else(|| "typesafe".to_owned());
+    let max_len = args.max_len.or(server.max_len);
+    let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
+    let tf32 = args.tf32 || server.tf32.unwrap_or(false);
+    set_tf32(tf32);
+    let options = make_laya_options(&device, &dtype, max_len, &confidence, local_window)?;
+    let specs = if args.models.is_empty() {
+        config.model_specs()
+    } else {
+        args.models
+    };
     let registry = {
-        let hub = make_hub(cache, offline)?;
-        let (manifests, factory) = build_models(&hub, &args.models, options)?;
+        let hub = make_hub(cache, offline, config)?;
+        let (manifests, factory) = build_models(&hub, &specs, options)?;
         Arc::new(ModelRegistry::new(
             manifests,
             Arc::new(factory),
             RegistryConfig::default(),
         )?)
     };
-    let batching = if args.no_batch {
+    let batch_max = args.batch_max.or(server.batch_max).unwrap_or(32);
+    let batch_wait_ms = args.batch_wait_ms.or(server.batch_wait_ms).unwrap_or(2);
+    let batching = if args.no_batch || server.batch == Some(false) {
         None
     } else {
         Some(BatchConfig {
-            max_batch: args.batch_max.max(1),
-            max_wait: Duration::from_millis(args.batch_wait_ms),
+            max_batch: batch_max.max(1),
+            max_wait: Duration::from_millis(batch_wait_ms),
         })
     };
-    let config = ServerConfig {
-        api_key: args.api_key,
+    let server_config = ServerConfig {
+        api_key: args.api_key.or_else(|| server.api_key.clone()),
         batching,
         ..ServerConfig::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(serve(args.bind, registry, config))?;
+    runtime.block_on(serve(bind, registry, server_config))?;
     Ok(())
 }
 
-fn run_command(cache: Option<&Path>, offline: bool, args: RunArgs) -> anyhow::Result<()> {
-    set_tf32(args.tf32);
-    let hub = make_hub(cache, offline)?;
-    let options = make_laya_options(
-        &args.device,
-        &args.dtype,
-        args.max_len,
-        &args.laya_confidence,
-        !args.no_local_window,
-    )?;
-    let pulled = pull_model(&hub, &args.reference)?;
+fn run_command(
+    cache: Option<&Path>,
+    offline: bool,
+    config: &LoadedConfig,
+    args: RunArgs,
+) -> anyhow::Result<()> {
+    let server = &config.value.server;
+    let device = args
+        .device
+        .or_else(|| server.device.clone())
+        .unwrap_or_else(|| "auto".to_owned());
+    let dtype = args
+        .dtype
+        .or_else(|| server.dtype.clone())
+        .unwrap_or_else(|| "auto".to_owned());
+    let confidence = args
+        .laya_confidence
+        .or_else(|| server.laya_confidence.clone())
+        .unwrap_or_else(|| "typesafe".to_owned());
+    let max_len = args.max_len.or(server.max_len);
+    let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
+    let tf32 = args.tf32 || server.tf32.unwrap_or(false);
+    set_tf32(tf32);
+    let hub = make_hub(cache, offline, config)?;
+    let options = make_laya_options(&device, &dtype, max_len, &confidence, local_window)?;
+    let reference = config.model_reference(&args.reference);
+    let pulled = pull_model(&hub, &reference)?;
     let input = read_input(&args.input)?;
     let value: serde_json::Value =
         serde_json::from_str(&input).context("input must be a JSON object")?;
@@ -259,8 +318,13 @@ fn run_command(cache: Option<&Path>, offline: bool, args: RunArgs) -> anyhow::Re
     Ok(())
 }
 
-fn doctor_command(cache: Option<&Path>, offline: bool, args: DoctorArgs) -> anyhow::Result<()> {
-    let hub = make_hub(cache, offline)?;
+fn doctor_command(
+    cache: Option<&Path>,
+    offline: bool,
+    config: &LoadedConfig,
+    args: DoctorArgs,
+) -> anyhow::Result<()> {
+    let hub = make_hub(cache, offline, config)?;
     let device = resolve_device(&args.device)?;
     let dtype = parse_dtype(&args.dtype)?;
     println!("rust-sys1 doctor");
@@ -270,6 +334,15 @@ fn doctor_command(cache: Option<&Path>, offline: bool, args: DoctorArgs) -> anyh
     println!("  accelerate: {}", cfg!(feature = "accelerate"));
     println!("  device: {device:?}");
     println!("  dtype: {dtype:?}");
+    println!(
+        "  config: {}",
+        config
+            .path
+            .as_deref()
+            .map(Path::display)
+            .map(|path| path.to_string())
+            .unwrap_or_else(|| "(defaults)".to_owned())
+    );
     println!("  cache: {}", hub.config().cache_dir.display());
     println!("  hf endpoint: {}", hub.config().hf_endpoint);
     println!(
@@ -280,13 +353,51 @@ fn doctor_command(cache: Option<&Path>, offline: bool, args: DoctorArgs) -> anyh
     Ok(())
 }
 
-fn make_hub(cache: Option<&Path>, offline: bool) -> anyhow::Result<Hub> {
+fn make_hub(cache: Option<&Path>, offline: bool, loaded: &LoadedConfig) -> anyhow::Result<Hub> {
+    let hub = &loaded.value.hub;
     let mut config = HubConfig::from_env();
+    // Precedence for paths/endpoints: CLI > environment > sys1.toml > defaults.
+    let env_set = |key: &str| std::env::var_os(key).is_some();
+    if !env_set("SYS1_CACHE")
+        && let Some(cache) = &hub.cache_dir
+    {
+        config.cache_dir = cache.clone();
+    }
+    if !env_set("HF_ENDPOINT")
+        && let Some(endpoint) = &hub.hf_endpoint
+    {
+        config.hf_endpoint = endpoint.trim().trim_end_matches('/').to_owned();
+    }
+    if !env_set("MODELSCOPE_ENDPOINT")
+        && let Some(endpoint) = &hub.modelscope_endpoint
+    {
+        config.modelscope_endpoint = endpoint.trim().trim_end_matches('/').to_owned();
+    }
+    if !env_set("HF_TOKEN")
+        && let Some(token) = &hub.hf_token
+    {
+        config.hf_token = Some(token.clone());
+    }
+    if !env_set("MODELSCOPE_API_TOKEN")
+        && let Some(token) = &hub.modelscope_token
+    {
+        config.modelscope_token = Some(token.clone());
+    }
+    if !env_set("SYS1_HUB_TOKEN")
+        && let Some(token) = &hub.http_token
+    {
+        config.http_token = Some(token.clone());
+    }
+    if !env_set("SYS1_HTTP_TIMEOUT_SECS")
+        && let Some(secs) = hub.timeout_secs
+    {
+        config.timeout = Duration::from_secs(secs.max(1));
+    }
+    if hub.offline.unwrap_or(false) || offline {
+        config.offline = true;
+    }
     if let Some(cache) = cache {
         config.cache_dir = cache.to_path_buf();
-    }
-    if offline {
-        config.offline = true;
     }
     Ok(Hub::new(config)?)
 }

@@ -1,0 +1,38 @@
+# Copy to sys1.toml (or pass --config). All values below are optional and
+# override the built-in defaults. Precedence: CLI > environment > this file.
+#
+# Relative cache/model paths are resolved from this file's directory.
+
+[hub]
+# Model download/cache directory.
+cache_dir = "D:/models/sys1-cache"
+# offline = false
+# hf_endpoint = "https://huggingface.co"
+# modelscope_endpoint = "https://modelscope.cn"
+# timeout_secs = 60
+# Prefer HF_TOKEN / MODELSCOPE_API_TOKEN / SYS1_HUB_TOKEN environment variables
+# for credentials; these fields are available for self-contained deployments.
+# hf_token = "..."
+# modelscope_token = "..."
+# http_token = "..."
+
+[server]
+# bind = "127.0.0.1:8080"
+# api_key = "..."              # prefer SYS1_API_KEY
+# device = "auto"              # auto | cpu | cuda:0 | metal
+# dtype = "auto"               # auto | f32 | f16 | bf16
+# max_len = 1024
+# laya_confidence = "typesafe" # typesafe | laya
+# batch_max = 32
+# batch_wait_ms = 2
+# batch = true                 # false disables cross-request batching
+# tf32 = false                 # F32 CUDA GEMMs
+# local_window = true          # exact local-window attention (CUDA, >=512 tokens)
+
+# Serving model catalog. Keys are the names clients pass to /v1/systemone.
+# Values are ModelRefs: local:/path, hf:owner/repo, modelscope:..., or a
+# manifest URL. The same names work with `sys1 run`, `pull`, `show`, and `rm`.
+[models]
+laya-latest = "local:D:/models/laya"
+# laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+# laya-typed-decisions = "https://example.com/models/laya-typed-decisions/model.json"

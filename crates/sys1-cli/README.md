@@ -57,6 +57,30 @@ Useful flags:
 --cache <dir>              # or SYS1_CACHE
 ```
 
+## Configuration
+
+`--config <file>` or `SYS1_CONFIG` loads a TOML file; `./sys1.toml` is used
+automatically when present. CLI values override environment variables, which
+override the file, which overrides built-in defaults.
+
+```toml
+[hub]
+cache_dir = "D:/models/sys1-cache"
+
+[server]
+device = "cuda:0"
+dtype = "f16"
+batch_max = 32
+
+[models]
+laya-latest = "local:D:/models/laya"
+laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+```
+
+See [`sys1.toml.example`](../../sys1.toml.example). Relative local paths resolve
+from the config file's directory. `[models]` names also work with `pull`,
+`show`, `rm`, and `run`.
+
 ## Load generator
 
 ```bash
