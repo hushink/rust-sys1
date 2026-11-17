@@ -65,6 +65,10 @@ let app = router_with_resolver(
   the configured `ModelResolver`, and registers every returned manifest. If a
   returned name already exists, the request fails with `409` and the existing
   catalog is left intact.
+- Add `"load": true` to load the primary model before returning `201` (a
+  bundle's router is primary; individual variants stay lazy). A load failure
+  rolls back the registration.
+- `GET /api/models` reports `origin: "configured" | "runtime"` per model.
 - `DELETE /api/models/{name}` also calls `ModelResolver::release`, allowing the
   resolver to forget local directory mappings.
 - Without a resolver, `POST /api/models` returns `501`; load/unload/reload and

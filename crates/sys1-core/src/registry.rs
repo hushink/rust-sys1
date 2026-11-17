@@ -1,9 +1,18 @@
 use crate::{DecisionOutput, Error, ManifestError, ModelFactory, ModelManifest, Questions};
 use indexmap::IndexMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use sys1_protocol::{ModelMetadata, State, SystemOneResponse};
+
+/// Where a catalog entry came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelOrigin {
+    /// Passed to [`ModelRegistry::new`]; restored on restart.
+    Configured,
+    /// Added at runtime with [`ModelRegistry::register`].
+    Runtime,
+}
 
 /// Registry limits.
 #[derive(Clone, Copy, Debug)]
@@ -49,6 +58,7 @@ pub struct ModelRegistry {
 struct Catalog {
     manifests: IndexMap<String, ModelManifest>,
     aliases: HashMap<String, String>,
+    runtime: HashSet<String>,
 }
 
 impl Catalog {
@@ -61,7 +71,11 @@ impl Catalog {
         Some((manifest.name.clone(), manifest.clone()))
     }
 
-    fn insert(&mut self, manifest: ModelManifest) -> Result<(), ManifestError> {
+    fn insert(
+        &mut self,
+        manifest: ModelManifest,
+        origin: ModelOrigin,
+    ) -> Result<(), ManifestError> {
         manifest.validate()?;
         if self.manifests.contains_key(&manifest.name) {
             return Err(ManifestError::DuplicateName(manifest.name));
@@ -80,6 +94,9 @@ impl Catalog {
         for alias in &manifest.aliases {
             self.aliases.insert(alias.clone(), manifest.name.clone());
         }
+        if origin == ModelOrigin::Runtime {
+            self.runtime.insert(manifest.name.clone());
+        }
         self.manifests.insert(manifest.name.clone(), manifest);
         Ok(())
     }
@@ -88,6 +105,7 @@ impl Catalog {
         let (canonical, _) = self.resolve(name)?;
         self.manifests.shift_remove(&canonical);
         self.aliases.retain(|_, target| target != &canonical);
+        self.runtime.remove(&canonical);
         Some(canonical)
     }
 }
@@ -134,9 +152,10 @@ impl ModelRegistry {
         let mut catalog = Catalog {
             manifests: IndexMap::new(),
             aliases: HashMap::new(),
+            runtime: HashSet::new(),
         };
         for manifest in manifests {
-            catalog.insert(manifest)?;
+            catalog.insert(manifest, ModelOrigin::Configured)?;
         }
 
         Ok(Self {
@@ -159,7 +178,20 @@ impl ModelRegistry {
     /// Add a model to the runtime catalog. The registry factory must be able
     /// to load it; see [`crate::ModelResolver`].
     pub fn register(&self, manifest: ModelManifest) -> Result<(), ManifestError> {
-        self.lock_catalog_mut().insert(manifest)
+        self.lock_catalog_mut()
+            .insert(manifest, ModelOrigin::Runtime)
+    }
+
+    /// Whether a catalog entry came from startup configuration or a runtime
+    /// `register` call. Aliases resolve to their canonical entry.
+    pub fn origin(&self, name: &str) -> Option<ModelOrigin> {
+        let catalog = self.lock_catalog();
+        let (canonical, _) = catalog.resolve(name)?;
+        Some(if catalog.runtime.contains(&canonical) {
+            ModelOrigin::Runtime
+        } else {
+            ModelOrigin::Configured
+        })
     }
 
     /// Remove a model (or alias) from the runtime catalog and drop its resident

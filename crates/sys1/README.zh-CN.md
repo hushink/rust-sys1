@@ -78,11 +78,24 @@ let billing = output.answers.noul("billing")?;
 - `sys1::laya` — `sys1-laya` 全部（feature `laya`）
 - 扁平别名：`DecisionModel`、`ModelResolver`、`ModelRegistry`、`ModelManifest`、
   `Questions`、`Answers`、`State`、`Question`、`Answer`、`EngineOptions`、
-  `EngineError`、`InferenceEngine`、`ModelOptions`、`ConfidenceMode`、
-  `LayaModel`、`LayaOptions`、`LayaFactory`、`LayaRouter`、`Hub`、`HubConfig`。
+  `EngineError`、`InferenceEngine`、`ModelOptions`、`ModelOrigin`、
+  `ConfidenceMode`、`LayaModel`、`LayaOptions`、`LayaFactory`、`LayaRouter`、
+  `Hub`、`HubConfig`。
 
 Engine 是增量能力：原有的 `LayaModel` / `LayaOptions` 直接 API 继续可用，
 Laya 类型也可通过 `sys1::laya` 访问。
+
+## 基准
+
+Engine 只增加注册表查找与句柄管理开销：
+
+```bash
+cargo run --release -p sys1 --example engine_overhead -- /path/to/laya-multilingual 30
+```
+
+CPU F32 multilingual、30 次交替测量：直接 checkpoint 推理约 121.7 ms 均值 /
+119.9 ms p50；engine 约 122.6 ms / 120.5 ms，即约 **0.9 ms 均值、0.65 ms p50
+（<1%）**。无需改为 `Arc<ModelManifest>`。
 
 ## 测试
 

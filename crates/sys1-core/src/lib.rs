@@ -18,4 +18,4 @@ pub use model::{
     DecisionModel, DecisionOutput, ModelError, ModelFactory, ModelResolver, Prediction,
 };
 pub use questions::Questions;
-pub use registry::{ModelRegistry, RegistryConfig};
+pub use registry::{ModelOrigin, ModelRegistry, RegistryConfig};

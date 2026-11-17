@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sys1_core::{
-    DecisionModel, DecisionOutput, Error as RegistryError, ManifestError, ModelError,
+    DecisionModel, DecisionOutput, Error as RegistryError, ManifestError, ModelError, ModelOrigin,
     ModelRegistry, ModelResolver, Prediction, Questions,
 };
 use sys1_protocol::{
@@ -419,6 +419,7 @@ struct AdminModelInfo {
     backend: String,
     format: String,
     version: String,
+    origin: &'static str,
     loaded: bool,
 }
 
@@ -446,11 +447,15 @@ struct AdminModelActionResult {
 #[derive(Deserialize)]
 struct AddModelRequest {
     reference: String,
+    #[serde(default)]
+    load: bool,
 }
 
 #[derive(Serialize)]
 struct AddModelResult {
     models: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    loaded: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -471,6 +476,11 @@ async fn admin_models(State(state): State<AppState>, headers: HeaderMap) -> Resp
         .into_iter()
         .map(|manifest| AdminModelInfo {
             loaded: state.registry.is_loaded(&manifest.name),
+            origin: match state.registry.origin(&manifest.name) {
+                Some(ModelOrigin::Configured) => "configured",
+                Some(ModelOrigin::Runtime) => "runtime",
+                None => "unknown",
+            },
             name: manifest.name,
             aliases: manifest.aliases,
             description: manifest.description,
@@ -732,10 +742,62 @@ async fn admin_add_model(State(state): State<AppState>, request: Request) -> Res
         added.push(name);
     }
 
-    tracing::info!(reference = %reference, models = ?added, "registered models at runtime");
+    let loaded = if payload.load {
+        // The primary manifest is last: a bundle registers its variants first
+        // and the router (or single checkpoint) last.
+        let primary = added
+            .last()
+            .cloned()
+            .expect("a successful registration added at least one model");
+        let registry = state.registry.clone();
+        let metrics = state.metrics.clone();
+        let load_name = primary.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let started = Instant::now();
+            let acquired = registry.acquire(&load_name);
+            metrics.record_model_load(started.elapsed(), acquired.is_ok());
+            acquired
+        })
+        .await;
+
+        match result {
+            Ok(Ok(_)) => Some(primary),
+            Ok(Err(error)) => {
+                for name in &added {
+                    state.registry.unregister(name);
+                    let _ = resolver.release(name);
+                }
+                let error = map_registry_error(error);
+                return json_response(error.status, error.body, &request_id);
+            }
+            Err(error) => {
+                for name in &added {
+                    state.registry.unregister(name);
+                    let _ = resolver.release(name);
+                }
+                return json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ErrorResponse::bad_request(format!("model load task failed: {error}")),
+                    &request_id,
+                );
+            }
+        }
+    } else {
+        None
+    };
+
+    tracing::info!(
+        reference = %reference,
+        models = ?added,
+        loaded = ?loaded,
+        "registered models at runtime"
+    );
     json_response(
         StatusCode::CREATED,
-        AddModelResult { models: added },
+        AddModelResult {
+            models: added,
+            loaded,
+        },
         &request_id,
     )
 }

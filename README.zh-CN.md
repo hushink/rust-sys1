@@ -104,14 +104,16 @@ curl http://127.0.0.1:8080/api/models
 curl -X POST http://127.0.0.1:8080/api/models/laya-latest/load
 curl -X POST http://127.0.0.1:8080/api/models \
   -H 'Content-Type: application/json' \
-  -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
+  -d '{"reference":"hf:convaiinnovations/laya-multilingual","load":true}'
 curl -X POST http://127.0.0.1:8080/api/models/laya-multilingual/unload
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 ```
 
 `POST /api/models` 接受与 `sys1 pull` 相同的引用，也接受 `sys1.toml` 中
-`[models]` 的名称。运行时添加/移除的条目不会持久化：重启后以配置中的
-`[models]` 为准。已经持有模型句柄的请求会正常完成，后续请求会重新触发懒加载。
+`[models]` 的名称。`"load": true` 会在返回前加载主模型；加载失败会回滚注册。
+`GET /api/models` 标记每个条目是 `configured` 还是 `runtime`。运行时添加/移除
+的条目不会持久化：重启后以配置中的 `[models]` 为准。已经持有模型句柄的请求会
+正常完成，后续请求会重新触发懒加载。
 
 ### 指标与预加载
 

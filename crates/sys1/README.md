@@ -84,11 +84,24 @@ Lower-level access is still available through `sys1::core`, `sys1::protocol`,
 - Flat aliases: `DecisionModel`, `ModelResolver`, `ModelRegistry`,
   `ModelManifest`, `Questions`, `Answers`, `State`, `Question`, `Answer`,
   `EngineOptions`, `EngineError`, `InferenceEngine`, `ModelOptions`,
-  `ConfidenceMode`, `LayaModel`, `LayaOptions`, `LayaFactory`, `LayaRouter`,
-  `Hub`, `HubConfig`.
+  `ModelOrigin`, `ConfidenceMode`, `LayaModel`, `LayaOptions`, `LayaFactory`,
+  `LayaRouter`, `Hub`, `HubConfig`.
 
 The engine is additive: the existing `LayaModel` / `LayaOptions` direct API
 keeps working, and Laya types are also available under `sys1::laya`.
+
+## Benchmark
+
+The engine adds registry lookup and handle bookkeeping only:
+
+```bash
+cargo run --release -p sys1 --example engine_overhead -- /path/to/laya-multilingual 30
+```
+
+On CPU F32 multilingual (30 interleaved iterations), direct checkpoint
+prediction was ~121.7 ms mean / 119.9 ms p50; the engine was ~122.6 ms /
+120.5 ms — **~0.9 ms mean, ~0.65 ms p50 (<1%)**. No `Arc<ModelManifest>`
+optimization was needed.
 
 ## Test
 

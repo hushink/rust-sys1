@@ -108,13 +108,15 @@ curl http://127.0.0.1:8080/api/models
 curl -X POST http://127.0.0.1:8080/api/models/laya-latest/load
 curl -X POST http://127.0.0.1:8080/api/models \
   -H 'Content-Type: application/json' \
-  -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
+  -d '{"reference":"hf:convaiinnovations/laya-multilingual","load":true}'
 curl -X POST http://127.0.0.1:8080/api/models/laya-multilingual/unload
 curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 ```
 
 `POST /api/models` accepts the same references as `sys1 pull`, plus `[models]`
-names from `sys1.toml`. Added and removed entries are runtime-only: the
+names from `sys1.toml`. `"load": true` loads the primary model before returning;
+a failure rolls back the registration. `GET /api/models` marks each entry as
+`configured` or `runtime`. Added and removed entries are runtime-only: the
 configured `[models]` catalog is authoritative after a restart. In-flight
 requests that already hold a model handle finish normally; later requests
 trigger a lazy load again.

@@ -117,6 +117,14 @@ impl ModelFactory for NoBatchFactory {
     }
 }
 
+struct FailingFactory;
+
+impl ModelFactory for FailingFactory {
+    fn load(&self, _manifest: &ModelManifest) -> Result<Arc<dyn DecisionModel>, ModelError> {
+        Err(ModelError::load("planned load failure"))
+    }
+}
+
 fn output_for(questions: &Questions) -> DecisionOutput {
     let answers = questions
         .iter()
@@ -531,7 +539,7 @@ async fn admin_adds_and_removes_models_through_a_resolver() {
 
     let (status, _, body) = send(
         app.clone(),
-        post("/api/models", r#"{"reference":"test:dynamic"}"#),
+        post("/api/models", r#"{"reference":"test:dynamic","load":true}"#),
     )
     .await;
     assert_eq!(
@@ -542,6 +550,22 @@ async fn admin_adds_and_removes_models_through_a_resolver() {
     );
     let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
     assert_eq!(value["models"][0], "dynamic-test");
+    assert_eq!(value["loaded"], "dynamic-test");
+
+    let (_, _, body) = send(app.clone(), get("/api/models")).await;
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    let models = value["models"].as_array().expect("models");
+    let dynamic = models
+        .iter()
+        .find(|model| model["name"] == "dynamic-test")
+        .expect("dynamic model");
+    assert_eq!(dynamic["origin"], "runtime");
+    assert_eq!(dynamic["loaded"], true);
+    let configured = models
+        .iter()
+        .find(|model| model["name"] == "laya-test")
+        .expect("configured model");
+    assert_eq!(configured["origin"], "configured");
 
     // The alias is usable immediately, and the model can be loaded on demand.
     let (status, _, body) = send(app.clone(), post("/api/models/dynamic-alias/load", "")).await;
@@ -751,6 +775,51 @@ async fn admin_can_populate_an_empty_catalog() {
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
     let response: SystemOneResponse = serde_json::from_slice(&body).expect("response JSON");
     assert_eq!(response.model, "dynamic-test");
+}
+
+#[tokio::test]
+async fn admin_add_with_load_rolls_back_on_failure() {
+    let registry = Arc::new(
+        ModelRegistry::new(
+            Vec::new(),
+            Arc::new(FailingFactory),
+            RegistryConfig::default(),
+        )
+        .expect("registry"),
+    );
+    let resolver: Arc<dyn ModelResolver> = Arc::new(FakeResolver);
+    let app = router_with_resolver(
+        registry,
+        ServerConfig {
+            enable_admin: true,
+            enable_metrics: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        Some(resolver),
+    );
+
+    let (status, _, body) = send(
+        app.clone(),
+        post("/api/models", r#"{"reference":"test:dynamic","load":true}"#),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let (_, _, body) = send(app.clone(), get("/v1/models")).await;
+    let models: ModelMetadataList = serde_json::from_slice(&body).expect("models JSON");
+    assert!(models.models.is_empty());
+
+    let (_, _, body) = send(app, get("/api/metrics")).await;
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["models"]["loads"], 1);
+    assert_eq!(value["models"]["load_errors"], 1);
+    assert_eq!(value["models"]["loaded_count"], 0);
 }
 
 #[tokio::test]

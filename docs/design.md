@@ -206,6 +206,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 已用本地缓存权重验证 `InferenceEngine` 进程内链路：`from_directory` → `add` → `predict` → `unload`；示例输出 noul 0.9678、score 1.7664，ignored 集成测试 19.4 s 通过。
 - 命名边界已整理：非 `sys1-laya` crate 不再定义 `Laya*` 标识符；checkpoint 布局辅助移入 `sys1-laya`。
 - 已实现 `/metrics` 与 `/api/metrics`（systemone、batching、模型生命周期、按模型请求数）；`preload` 启动预加载在 `serve` 绑定端口前执行，未知模型即失败。
+- 管理 API 支持 `POST /api/models` 的 `"load": true`（加载失败回滚注册），`GET /api/models` 标记 `configured` / `runtime`。
+- Engine 开销基准（CPU F32 multilingual，30 次交替）：直接推理 121.7 ms 均值、engine 122.6 ms，约 0.9 ms（<1%）；无需进一步优化 manifest 克隆。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
 - 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。

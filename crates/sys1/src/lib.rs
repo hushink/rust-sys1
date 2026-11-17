@@ -43,7 +43,7 @@ pub use engine::{EngineError, EngineOptions, InferenceEngine, ModelOptions};
 
 pub use sys1_core::{
     AnswerError, Answers, DecisionModel, DecisionOutput, ModelError, ModelFactory, ModelManifest,
-    ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
+    ModelOrigin, ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
 };
 pub use sys1_protocol::{
     Answer, ChoiceAnswer, Content, ModelMetadata, ModelMetadataList, NoulAnswer, Question,

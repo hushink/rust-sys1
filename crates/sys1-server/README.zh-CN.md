@@ -64,6 +64,9 @@ let app = router_with_resolver(
 - `POST /api/models` 接收 `{"reference": "hf:owner/repo"}`，通过
   `ModelResolver` 解析并注册返回的所有 manifest。若名称已存在则返回 `409`，
   原有目录保持不变。
+- 加 `"load": true` 会在返回 `201` 前加载主模型（bundle 的主模型是 router，
+  各变体保持懒加载）；加载失败会回滚注册。
+- `GET /api/models` 为每个模型输出 `origin: "configured" | "runtime"`。
 - `DELETE /api/models/{name}` 还会调用 `ModelResolver::release`，让 resolver
   清理本地目录映射。
 - 未配置 resolver 时，`POST /api/models` 返回 `501`；已配置模型的

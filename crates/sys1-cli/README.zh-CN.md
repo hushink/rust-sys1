@@ -87,8 +87,10 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 ```
 
 添加引用时会通过 hub 物化模型（已缓存则直接使用），并立即对
-`/v1/systemone` 可见。运行时添加/移除不会持久化；重启后以 `sys1.toml`
-中的 `[models]` 为准。已经持有模型句柄的请求会正常完成。
+`/v1/systemone` 可见。加 `"load": true` 会在返回前加载主模型；加载失败会回滚
+注册。`GET /api/models` 会标记每个条目是 `configured` 还是 `runtime`。
+运行时添加/移除不会持久化；重启后以 `sys1.toml` 中的 `[models]` 为准。
+已经持有模型句柄的请求会正常完成。
 
 `--preload NAME`（或 `[server] preload`）在监听端口前加载指定模型，避免首个
 请求承担冷加载；预加载失败会带模型名终止启动。

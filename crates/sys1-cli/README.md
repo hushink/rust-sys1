@@ -87,9 +87,12 @@ curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
 ```
 
 Adding a reference materializes it through the hub (unless cached) and makes it
-available to `/v1/systemone` immediately. Runtime additions and removals are not
-persisted; `[models]` in `sys1.toml` is authoritative after a restart.
-In-flight requests holding a model handle finish normally.
+available to `/v1/systemone` immediately. Send `"load": true` to also load the
+primary model before the response; a load failure rolls back the registration.
+`GET /api/models` marks each entry as `configured` or `runtime`. Runtime
+additions and removals are not persisted; `[models]` in `sys1.toml` is
+authoritative after a restart. In-flight requests holding a model handle finish
+normally.
 
 `--preload NAME` (or `[server] preload`) loads selected models before the
 listener starts, so the first request does not pay the cold-load cost. A

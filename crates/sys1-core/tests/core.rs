@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use sys1_core::{
     AnswerError, Answers, DecisionModel, DecisionOutput, DevicePreference, Error, ManifestError,
-    ModelError, ModelFactory, ModelFile, ModelManifest, ModelRegistry, Questions, RegistryConfig,
-    ResolvedDevice,
+    ModelError, ModelFactory, ModelFile, ModelManifest, ModelOrigin, ModelRegistry, Questions,
+    RegistryConfig, ResolvedDevice,
 };
 use sys1_protocol::{
     Answer, AnswerType, ChoiceAnswer, NoulAnswer, Question, ScoreAnswer, State, Usage,
@@ -240,10 +240,13 @@ fn list_models_includes_alias() {
 #[test]
 fn runtime_registration_and_removal() {
     let (registry, factory) = registry(vec![manifest("a", &["alias-a"])], 3);
+    assert_eq!(registry.origin("a"), Some(ModelOrigin::Configured));
+    assert_eq!(registry.origin("alias-a"), Some(ModelOrigin::Configured));
     registry
         .register(manifest("b", &["alias-b"]))
         .expect("register b");
     assert_eq!(registry.resolve("alias-b").expect("resolve alias").0, "b");
+    assert_eq!(registry.origin("alias-b"), Some(ModelOrigin::Runtime));
     assert_eq!(registry.manifests().len(), 2);
 
     let _ = registry.acquire("b").expect("load b");
@@ -260,6 +263,7 @@ fn runtime_registration_and_removal() {
 
     assert!(registry.unregister("alias-b"));
     assert!(registry.resolve("b").is_none());
+    assert_eq!(registry.origin("b"), None);
     assert!(!registry.is_loaded("b"));
     assert!(!registry.unregister("b"));
     assert_eq!(factory.loads.load(Ordering::SeqCst), 1);
