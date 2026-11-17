@@ -177,8 +177,9 @@ mod tests {
     use super::*;
     use std::fs;
     use sys1_core::RegistryConfig;
+    use sys1_families::FamilyFactory;
     use sys1_hub::{Hub, HubConfig};
-    use sys1_laya::{LayaFactory as CheckpointFactory, LayaOptions as ModelOptions};
+    use sys1_laya::LayaOptions as ModelOptions;
 
     fn checkpoint(directory: &Path) {
         fs::create_dir_all(directory.join("encoder")).expect("encoder dir");
@@ -224,7 +225,7 @@ mod tests {
         write_config(&config_path, None, "");
 
         let loaded = config::load(Some(&config_path)).expect("initial config");
-        let factory = Arc::new(CheckpointFactory::new());
+        let factory = Arc::new(FamilyFactory::new());
         let hub = Arc::new(Hub::new(HubConfig::new(root.join("cache"))).expect("hub"));
         let registry = Arc::new(
             ModelRegistry::new(Vec::new(), factory.clone(), RegistryConfig::default())

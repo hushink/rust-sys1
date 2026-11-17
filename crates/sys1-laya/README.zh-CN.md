@@ -3,6 +3,7 @@
 [English](README.md)
 
 candle 版 clean-room Laya 决策模型实现，并提供可选 ONNX Runtime 后端。
+ModernBERT 编码器通过 `sys1-modernbert` 与 NLI/GLiClass 共享。
 
 ## Checkpoints
 

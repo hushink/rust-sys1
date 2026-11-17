@@ -10,6 +10,7 @@ readme = "README.md"
 [dependencies]
 sys1-core = { path = "../sys1-core" }
 sys1-protocol = { path = "../sys1-protocol" }
+sys1-modernbert = { path = "../sys1-modernbert" }
 sys1-ort = { path = "../sys1-ort", optional = true }
 candle-core = { version = "0.11", default-features = false }
 candle-nn = { version = "0.11", default-features = false }

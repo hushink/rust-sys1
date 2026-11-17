@@ -12,7 +12,6 @@ mod factory;
 mod language;
 mod long;
 mod model;
-mod modernbert;
 #[cfg(feature = "onnx")]
 mod onnx;
 mod onnx_config;

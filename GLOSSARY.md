@@ -115,6 +115,14 @@ _Avoid_: Model type、architecture
 开源的 System One 模型族，包含 english、multilingual、typed-decisions 三个 checkpoint。
 _Avoid_: Laya 模型（冗余）
 
+**NLI cross-encoder（NLI 交叉编码器）**：
+把 state 与选项 hypothesis 拼成一对送入编码器、用 entailment logit 作为选项分数的模型族。
+_Avoid_: 文本分类器（仅指普通单文本分类时）
+
+**GLiClass**：
+Knowledgator 的 zero-shot 分类模型族；label 与文本共享一条序列，通过 label span 池化与 MLP 打分。
+_Avoid_: NLI（实现与训练目标不同）
+
 **Laya Router**：
 在 Laya 变体之间按语言或 typed-decisions 工作流签名选择 checkpoint 的组件。
 _Avoid_: Model selector

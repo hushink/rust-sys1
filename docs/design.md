@@ -9,7 +9,7 @@
 
 - 一个可嵌入其他 Rust 项目的**进程内推理接口**，类型安全、与官方 SDK 的数据模型对齐。
 - 一个 `sys1` CLI，运行严格兼容 TypeSafe 官方契约的 HTTP API（`/v1/systemone`、`/v1/models`）。
-- 可替换的 System One 模型族；v1 内置 Laya，后续可加其他 family/backend。
+- 可替换的 System One 模型族；v1 内置 Laya、NLI、GLiClass，后续可加其他 family/backend。
 - 多来源模型获取：本地路径、Hugging Face、ModelScope、自定义静态 HTTP 中心。
 - 单进程加载模型，带模型注册表、懒加载、LRU 与 keep_alive。
 - 编译期 feature 控制加速器与可选组件；运行时自动探测可用设备。
@@ -34,13 +34,19 @@ sys1-hub        ModelSource / ModelCache：Local、HF、ModelScope、HTTP
       ▲
 sys1-ort        动态加载的 ONNX Runtime session 与 token-scoring 契约
       ▲
+sys1-modernbert 共享 candle ModernBERT 编码器
+      ▲
 sys1-laya       Laya family：clean-room candle 实现 + 可选 ONNX 导出路径
+sys1-nli         NLI family：ModernBERT zero-shot 交叉编码器
+sys1-gliclass    GLiClass family：ModernBERT uni-encoder（32M edge）
+      ▲
+sys1-families   目录识别 + 统一 ModelFactory 分发
       ▲
 sys1-server     axum：严格官方 /v1/*、/health、运行时 /api/*、跨请求 batching、错误映射
       ▲
 sys1-cli        clap 二进制：serve/pull/list/show/rm/run/doctor
       ▲
-sys1            umbrella：InferenceEngine + 进程内 API，默认内置 Laya + 全部 hub 源
+sys1            umbrella：InferenceEngine + 进程内 API，默认内置 Laya/NLI/GLiClass + 全部 hub 源
 ```
 
 依赖方向单向向上；`sys1-core` 不依赖 `sys1-hub`，`sys1-server` 不依赖具体模型族。CLI 负责把 hub、laya、server 组装起来。
@@ -74,7 +80,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - `EngineOptions` 分组：`hub`（缓存/端点/凭据）、`registry`（LRU/keep_alive）、
   `model`（`ModelOptions`：device/dtype/max_len/confidence/attention）。
 - `new` 空目录；`from_reference` / `from_directory` 立即注册；`add` / `add_as`
-  通过 hub 物化并注册，仓库根自动注册 router 与三个变体；`remove` 卸载并移除。
+  通过 hub 物化并注册；Laya 仓库根自动注册 router 与三个变体，NLI/GLiClass
+  目录自动识别；`remove` 卸载并移除。
 - `predict` 返回 typed `DecisionOutput`；`systemone` 返回官方 `SystemOneResponse`；
   `predict_batch` 调用模型原生 batch；`load` / `unload` 控制常驻。
 - Engine 实现 `ModelResolver`，可直接作为 `sys1-server` 的运行时 resolver。
@@ -164,6 +171,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 | feature | 作用 | 默认 |
 |---|---|---|
 | `laya` | 内置 Laya family | 是（umbrella） |
+| `families` | Laya/NLI/GLiClass 统一识别与分发 | 是（umbrella） |
 | `hub-hf` / `hub-modelscope` / `hub-http` | 模型源适配器 | 是 |
 | `server` / `cli` | HTTP 服务 / 二进制 | 否（由 CLI 组合） |
 | `cuda` | candle CUDA | 否 |
@@ -209,7 +217,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 
 - **v1**：candle Laya、官方 API、hub、CLI、进程内接口、CUDA/Metal feature、doctor。
 - **v1.1**：parallel layout；ORT backend；ONNX 模型（含 act head）；TensorRT EP。ORT 路径使用 `ort 2.0.0-rc.15` + `load-dynamic`，构建期不下载运行时；API 17 已在 ONNX Runtime 1.17 上验证。TensorRT 需要本机 TensorRT SDK；candle 不能直接承载 TensorRT。本地 ONNX 导出器已实现并通过 golden 对齐；上游官方 ONNX 产物仍待补。
-- **后续**：Kev 或其他 family；动态插件评估（仅在设计稳定后）。
+- **后续**：Kev 等 decoder family；动态插件评估（仅在设计稳定后）。
 
 ### 实现状态（2026-11-17）
 
@@ -228,6 +236,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 配置热加载已实现：CLI 只应用 `[models]` 增删，新增项标记 `configured`；server 设置/引用变化 409，解析失败 400 且不改目录。真实进程验证 add 92 ms、remove、restart-required 409。
 - 可选 ORT backend 已实现：`sys1-ort` 负责动态 session 与 token-scoring 契约；`sys1-laya/onnx` 共享 tokenization/校准/答案格式化，只替换前向图；`onnx.json` 可覆盖 I/O 名、线程与 `max_batch`。已用合成 ONNX 图验证 batching、padding、marker 索引、factory 与 HTTP 全链路；`ort 2.0.0-rc.15` 在 Windows 上以 `load-dynamic` 成功加载系统 ONNX Runtime 1.17；rc.15 的显式 Environment 生命周期避免了 rc.13 在进程退出时的偶发崩溃。
 - 纯 NumPy/ONNX 导出器已实现（`python/tools` 的 `sys1-export-onnx`，不依赖 PyTorch）：从 safetensors 生成符合契约的 encoder/type embedding/decision head/scorer 计算图，并自动复制 tokenizer、`rl_agent_config.json` 与 `onnx.json`。三个 checkpoint 的导出 logits 与官方 golden 最大误差 1.7e-6–2.5e-6；`sys1-check-onnx` 可重复校验。Rust `onnx_parity` 测试比较 candle 与 ONNX 的完整答案。多 GB 导出建议 ONNX Runtime ≥1.20；Windows 1.17 加载 1.2 GiB 图不稳定，1.32 稳定。TensorRT EP CI 与上游官方 ONNX 产物仍待补。
+- 小型模型族已实现（candle）：`sys1-nli` 在 ModernBERT zero-shot 交叉编码器上实现 `nli-pairs-v1`（base/large），`sys1-gliclass` 在 ModernBERT edge 上实现 `gliclass-uni-v1`；二者共享 `sys1-modernbert`，并接入 `sys1-families`、CLI 与 `InferenceEngine`。概率与上游 Python 参考在 1e-4 内一致。
 - 缓存配额与 LRU 淘汰已实现：`HubConfig::max_cache_bytes`、`Hub::cache_usage` / `cache_entries` / `enforce_quota`、`CacheResidency` 常驻保护；CLI `/api/cache` 与 `sys1 list` 输出 limit/used/free/reclaimable，`sys1 doctor` 输出配额状态。测试覆盖 LRU 顺序、常驻保护、超大模型拒绝、pull 触发淘汰与活动下载保护。ADR 0012。
 - 生产收尾：CORS allowlist/关闭与优雅关闭已实现并有测试；CLI Ctrl-C/SIGTERM 停止接收并 drain。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。

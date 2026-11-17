@@ -14,6 +14,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Process-in inference: typed `Questions` / `Answers`, no HTTP or serialization required.
 - `InferenceEngine`: one object wires the hub, manifest, backend factory, registry, and typed inference.
 - Typed extensions: long-context scanning, `min_confidence` abstention, and act-head probabilities.
+- Multiple families in candle: Laya, NLI (ModernBERT zero-shot), and GLiClass (32M edge).
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
 - Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
 - Pure NumPy Laya-to-ONNX exporter with official golden logits within 2.5e-6.
@@ -32,6 +33,10 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 | [`sys1-core`](crates/sys1-core/README.md) | `DecisionModel`, registry, manifest, typed in-process API, device selection |
 | [`sys1-hub`](crates/sys1-hub/README.md) | Model sources and cache (Local / HF / ModelScope / HTTP) |
 | [`sys1-laya`](crates/sys1-laya/README.md) | Clean-room Laya implementation, router, ONNX export path |
+| [`sys1-modernbert`](crates/sys1-modernbert/README.md) | Shared candle ModernBERT encoder |
+| [`sys1-nli`](crates/sys1-nli/README.md) | ModernBERT zero-shot NLI decision model |
+| [`sys1-gliclass`](crates/sys1-gliclass/README.md) | GLiClass uni-encoder decision model (32M edge) |
+| [`sys1-families`](crates/sys1-families/README.md) | Family detection and dispatch for Laya/NLI/GLiClass |
 | [`sys1-ort`](crates/sys1-ort/README.md) | Dynamically loaded ONNX Runtime session and token-scoring layer |
 | [`sys1-server`](crates/sys1-server/README.md) | Axum server for `/v1/*` and `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.md) | `sys1` binary: serve/pull/list/show/rm/run/doctor |
@@ -107,6 +112,10 @@ sys1 serve --model laya-multilingual=local:/path/to/laya-multilingual
 # Laya repository root: registers laya-english / laya-multilingual /
 # laya-typed-decisions and enables the lazy laya-latest router
 sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
+
+# Small candle families (auto-detected from the checkpoint config):
+sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
 ```
 
 Default bind is `127.0.0.1:8080`. Optional Bearer auth:
@@ -595,6 +604,13 @@ cargo test --offline -p sys1-hub --test live -- --nocapture
 uv sync --all-extras
 uv run --package sys1-tools --group dev ruff check python/tools
 uv run sys1-generate-scoring-stub
+
+# Small candle families: NLI and GLiClass against upstream Python
+$env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
+cargo test -p sys1-nli --test nli -- --ignored --nocapture
+$env:SYS1_GLICLASS_TEST_DIR="D:/models/gliclass-edge"
+cargo test -p sys1-gliclass --test gliclass -- --ignored --nocapture
+cargo test -p sys1 --test families -- --ignored --nocapture
 ```
 
 The exporter produced logits within 2.5e-6 of the official golden vectors for

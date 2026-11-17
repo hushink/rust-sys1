@@ -2662,6 +2662,7 @@ name = "sys1"
 version = "0.1.0"
 dependencies = [
  "sys1-core",
+ "sys1-families",
  "sys1-hub",
  "sys1-laya",
  "sys1-ort",
@@ -2682,6 +2683,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sys1-core",
+ "sys1-families",
  "sys1-hub",
  "sys1-laya",
  "sys1-protocol",
@@ -2702,6 +2704,32 @@ dependencies = [
  "serde_json",
  "sys1-protocol",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sys1-families"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "sys1-core",
+ "sys1-gliclass",
+ "sys1-laya",
+ "sys1-nli",
+]
+
+[[package]]
+name = "sys1-gliclass"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-modernbert",
+ "sys1-protocol",
+ "tokenizers",
 ]
 
 [[package]]
@@ -2732,6 +2760,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sys1-core",
+ "sys1-modernbert",
  "sys1-ort",
  "sys1-protocol",
  "tempfile",
@@ -2739,6 +2768,31 @@ dependencies = [
  "tokenizers",
  "tracing",
  "unicode-general-category",
+]
+
+[[package]]
+name = "sys1-modernbert"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sys1-nli"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-modernbert",
+ "sys1-protocol",
+ "tokenizers",
 ]
 
 [[package]]

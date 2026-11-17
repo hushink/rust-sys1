@@ -3,7 +3,8 @@
 [简体中文](README.zh-CN.md)
 
 Clean-room Laya decision-model implementation in candle, with an optional ONNX
-Runtime backend.
+Runtime backend. The ModernBERT encoder is shared with NLI/GLiClass through
+`sys1-modernbert`.
 
 ## Checkpoints
 

@@ -1,7 +1,6 @@
 use crate::calibration::ConfidenceMode;
-use crate::config::{LayaConfig, ModernBertConfig};
+use crate::config::LayaConfig;
 use crate::long;
-use crate::modernbert::Encoder;
 use crate::prepare::{Item, PreparedRequest, deduplicate, prepare_request};
 use crate::response::build_response;
 use crate::router::LayaRouterOptions;
@@ -12,6 +11,7 @@ use std::path::Path;
 use sys1_core::{
     DecisionModel, DecisionOutput, LongContextOptions, ModelError, Prediction, Questions,
 };
+use sys1_modernbert::{Encoder, ModernBertConfig};
 use sys1_protocol::State;
 
 /// One question's logits and, when the checkpoint has one, the act-head
@@ -298,6 +298,7 @@ impl LayaModel {
             &encoder_config,
             compute_dtype,
             options.local_window,
+            "model",
         )
         .map_err(|error| ModelError::load(error.to_string()))?;
 

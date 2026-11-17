@@ -23,10 +23,26 @@ The `sys1` binary: model hub, one-shot inference, and TypeSafe-compatible server
 - `modelscope:owner/name@master`
 - `https://models.example.com/laya/model.json`
 
-A local Laya directory without `model.json` is accepted directly:
+A local directory without `model.json` is accepted directly. The family is
+detected from its files:
 
 ```bash
 sys1 run local:/path/to/laya-multilingual --input request.json
+sys1 run local:/path/to/nli-modernbert-base --input request.json
+sys1 run local:/path/to/gliclass-edge --input request.json
+```
+
+Supported candle families:
+
+- **Laya** (`sys1-laya`): `english`, `multilingual`, `typed-decisions`.
+- **NLI** (`sys1-nli`): `MoritzLaurer/ModernBERT-{base,large}-zeroshot-v2.0`.
+- **GLiClass** (`sys1-gliclass`): `knowledgator/gliclass-instruct-edge-v1.0`.
+
+Each family can be served from a local path or an `hf:` reference:
+
+```bash
+sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
 ```
 
 ## ONNX models

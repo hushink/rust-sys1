@@ -12,6 +12,7 @@ sys1-core = { path = "../sys1-core" }
 sys1-protocol = { path = "../sys1-protocol" }
 sys1-hub = { path = "../sys1-hub", optional = true }
 sys1-laya = { path = "../sys1-laya", optional = true }
+sys1-families = { path = "../sys1-families", optional = true }
 sys1-ort = { path = "../sys1-ort", optional = true }
 thiserror.workspace = true
 
@@ -19,10 +20,11 @@ thiserror.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["laya", "hub"]
+default = ["laya", "hub", "families"]
 laya = ["dep:sys1-laya"]
 hub = ["dep:sys1-hub"]
-onnx = ["dep:sys1-ort", "sys1-laya?/onnx"]
+families = ["dep:sys1-families"]
+onnx = ["dep:sys1-ort", "sys1-laya?/onnx", "sys1-families?/onnx"]
 cuda = ["sys1-laya?/cuda"]
 cudnn = ["sys1-laya?/cudnn"]
 metal = ["sys1-laya?/metal"]

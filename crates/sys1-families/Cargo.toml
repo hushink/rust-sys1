@@ -1,0 +1,19 @@
+[package]
+name = "sys1-families"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Multi-family dispatch for rust-sys1 model directories"
+readme = "README.md"
+
+[dependencies]
+sys1-core = { path = "../sys1-core" }
+sys1-gliclass = { path = "../sys1-gliclass" }
+sys1-laya = { path = "../sys1-laya" }
+sys1-nli = { path = "../sys1-nli" }
+indexmap.workspace = true
+
+[features]
+default = []
+onnx = ["sys1-laya/onnx"]

@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 sys1-core = { path = "../sys1-core" }
 sys1-protocol = { path = "../sys1-protocol" }
+sys1-families = { path = "../sys1-families" }
 sys1-hub = { path = "../sys1-hub" }
 sys1-laya = { path = "../sys1-laya" }
 sys1-server = { path = "../sys1-server" }
@@ -34,7 +35,7 @@ tempfile.workspace = true
 
 [features]
 default = ["onnx"]
-onnx = ["sys1-laya/onnx"]
+onnx = ["sys1-laya/onnx", "sys1-families/onnx"]
 cuda = ["sys1-laya/cuda", "candle-core/cuda"]
 cudnn = ["cuda", "sys1-laya/cudnn"]
 metal = ["sys1-laya/metal", "candle-core/metal"]

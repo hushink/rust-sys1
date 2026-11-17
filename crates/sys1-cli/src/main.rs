@@ -23,12 +23,13 @@ use sys1_core::{
     DecisionModel, DevicePreference, LongContextOptions, MinConfidence, ModelManifest,
     ModelRegistry, ModelResolver, PredictionOptions, Questions, RegistryConfig,
 };
+use sys1_families::{
+    FamilyFactory, is_supported_directory, load_manifest, local_manifest, register_bundle,
+};
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
-    ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory as CheckpointFactory,
-    LayaModel as CheckpointModel, LayaOptions as ModelOptions, LayaRouterOptions, RouteVariant,
-    has_checkpoint_variants, is_model_directory, local_checkpoint_manifest,
-    register_checkpoint_bundle, set_tf32,
+    ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaOptions as ModelOptions, LayaRouterOptions,
+    RouteVariant, has_checkpoint_variants, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{
@@ -568,24 +569,8 @@ fn run_command(
     .context("invalid questions")?;
     let questions = Questions::from(questions);
 
-    let model: Arc<dyn DecisionModel> = if pulled.manifest.backend == "onnx" {
-        #[cfg(feature = "onnx")]
-        {
-            Arc::new(sys1_laya::LayaOnnxModel::load_dir(
-                &pulled.directory,
-                options,
-            )?)
-        }
-        #[cfg(not(feature = "onnx"))]
-        {
-            bail!(
-                "model `{}` is ONNX, but this build of sys1-cli has the `onnx` feature disabled",
-                pulled.manifest.name
-            )
-        }
-    } else {
-        Arc::new(CheckpointModel::load_dir(&pulled.directory, options)?)
-    };
+    let model: Arc<dyn DecisionModel> =
+        load_manifest(&pulled.manifest, &pulled.directory, &options)?;
     let prediction_options = PredictionOptions {
         min_confidence: args.min_confidence.map(MinConfidence::scalar).transpose()?,
     };
@@ -918,21 +903,21 @@ fn build_models(
     hub: &Hub,
     specs: &[String],
     options: ModelOptions,
-) -> anyhow::Result<(Vec<ModelManifest>, Arc<CheckpointFactory>)> {
-    let factory = Arc::new(CheckpointFactory::new());
+) -> anyhow::Result<(Vec<ModelManifest>, Arc<FamilyFactory>)> {
+    let factory = Arc::new(FamilyFactory::new());
     let mut manifests = Vec::new();
     let mut seen = HashSet::new();
 
     if specs.is_empty() {
         for pulled in hub.list_cached()? {
-            if !is_model_directory(&pulled.directory) {
+            if !is_supported_directory(&pulled.directory) {
                 continue;
             }
-            let registered = register_checkpoint_bundle(
+            let registered = register_bundle(
                 &factory,
                 &pulled.manifest,
                 &pulled.directory,
-                options.clone(),
+                &options,
                 None,
             )?;
             for manifest in registered {
@@ -945,19 +930,21 @@ fn build_models(
     for spec in specs {
         let (name, reference) = parse_model_spec(spec)?;
         let pulled = pull_model(hub, &reference)?;
-        if !is_model_directory(&pulled.directory) {
-            bail!("{reference} does not look like a Laya checkpoint (safetensors or ONNX)");
+        if !is_supported_directory(&pulled.directory) {
+            bail!(
+                "{reference} does not look like a supported model directory (Laya, NLI, or GLiClass)"
+            );
         }
         if name == "laya-latest" && !has_checkpoint_variants(&pulled.directory) {
             tracing::warn!(
                 "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
             );
         }
-        let registered = register_checkpoint_bundle(
+        let registered = register_bundle(
             &factory,
             &pulled.manifest,
             &pulled.directory,
-            options.clone(),
+            &options,
             Some(&name),
         )?;
         for manifest in registered {
@@ -1001,7 +988,10 @@ fn pull_model(hub: &Hub, reference: &str) -> anyhow::Result<PulledModel> {
 }
 
 fn synthesise_local(directory: &Path) -> anyhow::Result<PulledModel> {
-    let (manifest, files) = local_checkpoint_manifest(directory)?;
+    let (manifest, files) = match local_manifest(directory) {
+        Ok(value) => value,
+        Err(_) => sys1_laya::local_checkpoint_manifest(directory)?,
+    };
     Ok(PulledModel {
         manifest,
         directory: directory.to_path_buf(),

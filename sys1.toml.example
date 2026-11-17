@@ -58,3 +58,6 @@ laya-latest = "local:D:/models/laya"
 # laya-onnx = "local:D:/models/laya-onnx"
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 # laya-typed-decisions = "https://example.com/models/laya-typed-decisions/model.json"
+# Small candle families are detected from the checkpoint config:
+# nli = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+# gliclass = "hf:knowledgator/gliclass-instruct-edge-v1.0"

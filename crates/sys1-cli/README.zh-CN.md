@@ -23,10 +23,25 @@
 - `modelscope:owner/name@master`
 - `https://models.example.com/laya/model.json`
 
-没有 `model.json` 的本地 Laya 目录可以直接使用：
+没有 `model.json` 的本地目录可以直接使用，模型族由目录内容自动识别：
 
 ```bash
 sys1 run local:/path/to/laya-multilingual --input request.json
+sys1 run local:/path/to/nli-modernbert-base --input request.json
+sys1 run local:/path/to/gliclass-edge --input request.json
+```
+
+支持的 candle 模型族：
+
+- **Laya**（`sys1-laya`）：`english`、`multilingual`、`typed-decisions`。
+- **NLI**（`sys1-nli`）：`MoritzLaurer/ModernBERT-{base,large}-zeroshot-v2.0`。
+- **GLiClass**（`sys1-gliclass`）：`knowledgator/gliclass-instruct-edge-v1.0`。
+
+每个模型族都可以从本地目录或 `hf:` 引用启动：
+
+```bash
+sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
 ```
 
 ## ONNX 模型

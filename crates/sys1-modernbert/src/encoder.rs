@@ -1,4 +1,4 @@
-use crate::config::ModernBertConfig;
+use crate::ModernBertConfig;
 use candle_core::{D, DType, Device, Result, Tensor};
 use candle_nn::{
     Embedding, LayerNorm, Linear, Module, VarBuilder, embedding, layer_norm_no_bias, ops::softmax,
@@ -258,13 +258,13 @@ impl Layer {
             mlp: Mlp::load(vb.pp("mlp"), config, compute_dtype)?,
             attention_norm: layer_norm_no_bias(
                 config.hidden_size,
-                config.layer_norm_eps,
+                config.layer_norm_eps(),
                 vb.pp("attn_norm"),
             )
             .ok(),
             mlp_norm: layer_norm_no_bias(
                 config.hidden_size,
-                config.layer_norm_eps,
+                config.layer_norm_eps(),
                 vb.pp("mlp_norm"),
             )?,
             uses_local_attention,
@@ -320,7 +320,7 @@ impl Layer {
     }
 }
 
-pub(crate) struct Encoder {
+pub struct Encoder {
     embeddings: Embedding,
     norm: LayerNorm,
     layers: Vec<Layer>,
@@ -332,11 +332,16 @@ pub(crate) struct Encoder {
 }
 
 impl Encoder {
+    /// Load the encoder from `vb`.
+    ///
+    /// `path_prefix` is the Hugging Face module prefix, e.g. `model` for
+    /// Laya/NLI or `model.encoder_model` for GLiClass.
     pub fn load(
         vb: VarBuilder,
         config: &ModernBertConfig,
         compute_dtype: DType,
         use_local_window: bool,
+        path_prefix: &str,
     ) -> Result<Self> {
         let global_rotary = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
@@ -354,7 +359,7 @@ impl Encoder {
         for index in 0..config.num_hidden_layers {
             let local = index % config.global_attn_every_n_layers != 0;
             layers.push(Layer::load(
-                vb.pp(format!("model.layers.{index}")),
+                vb.pp(format!("{path_prefix}.layers.{index}")),
                 config,
                 if local {
                     local_rotary.clone()
@@ -365,22 +370,23 @@ impl Encoder {
                 compute_dtype,
             )?);
         }
+        let eps = config.layer_norm_eps();
         Ok(Self {
             embeddings: embedding(
                 config.vocab_size,
                 config.hidden_size,
-                vb.pp("model.embeddings.tok_embeddings"),
+                vb.pp(format!("{path_prefix}.embeddings.tok_embeddings")),
             )?,
             norm: layer_norm_no_bias(
                 config.hidden_size,
-                config.layer_norm_eps,
-                vb.pp("model.embeddings.norm"),
+                eps,
+                vb.pp(format!("{path_prefix}.embeddings.norm")),
             )?,
             layers,
             final_norm: layer_norm_no_bias(
                 config.hidden_size,
-                config.layer_norm_eps,
-                vb.pp("model.final_norm"),
+                eps,
+                vb.pp(format!("{path_prefix}.final_norm")),
             )?,
             local_attention_size: config.local_attention,
             use_local_window,
@@ -389,20 +395,37 @@ impl Encoder {
         })
     }
 
-    pub fn forward(&self, ids: &Tensor, mask: &Tensor, has_padding: bool) -> Result<Tensor> {
-        let length = ids.dim(1)?;
+    /// Raw token embeddings, before the embedding norm.
+    pub fn token_embeddings(&self, ids: &Tensor) -> Result<Tensor> {
+        ids.apply(&self.embeddings)
+    }
+
+    /// Run the encoder from already-computed token embeddings. The embedding
+    /// norm is applied here, so families can add segment/type embeddings
+    /// first.
+    pub fn forward_embeds(
+        &self,
+        embeddings: Tensor,
+        mask: &Tensor,
+        has_padding: bool,
+    ) -> Result<Tensor> {
+        let length = embeddings.dim(1)?;
         let global_mask = has_padding
             .then(|| global_attention_mask(mask, length, self.dtype))
             .transpose()?;
-        let local_mask = self.local_mask(length, ids.device())?;
+        let local_mask = self.local_mask(length, embeddings.device())?;
         let local_window = self
             .use_local_window
             .then_some(self.local_attention_size / 2);
-        let mut xs = ids.apply(&self.embeddings)?.apply(&self.norm)?;
+        let mut xs = embeddings.apply(&self.norm)?;
         for layer in &self.layers {
             xs = layer.forward(&xs, global_mask.as_ref(), &local_mask, mask, local_window)?;
         }
         xs.apply(&self.final_norm)
+    }
+
+    pub fn forward(&self, ids: &Tensor, mask: &Tensor, has_padding: bool) -> Result<Tensor> {
+        self.forward_embeds(self.token_embeddings(ids)?, mask, has_padding)
     }
 
     fn local_mask(&self, length: usize, device: &Device) -> Result<Tensor> {

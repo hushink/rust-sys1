@@ -1,0 +1,19 @@
+[package]
+name = "sys1-gliclass"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GLiClass uni-encoder decision model for rust-sys1"
+readme = "README.md"
+
+[dependencies]
+sys1-core = { path = "../sys1-core" }
+sys1-modernbert = { path = "../sys1-modernbert" }
+sys1-protocol = { path = "../sys1-protocol" }
+candle-core = { version = "0.11", default-features = false }
+candle-nn = { version = "0.11", default-features = false }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true

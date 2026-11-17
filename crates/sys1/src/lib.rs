@@ -35,10 +35,15 @@ pub mod laya {
     pub use sys1_laya::*;
 }
 
-#[cfg(all(feature = "hub", feature = "laya"))]
+#[cfg(feature = "families")]
+pub mod families {
+    pub use sys1_families::*;
+}
+
+#[cfg(all(feature = "hub", feature = "laya", feature = "families"))]
 mod engine;
 
-#[cfg(all(feature = "hub", feature = "laya"))]
+#[cfg(all(feature = "hub", feature = "laya", feature = "families"))]
 pub use engine::{EngineError, EngineOptions, InferenceEngine, ModelOptions};
 
 pub use sys1_core::{

@@ -14,6 +14,7 @@
 - 进程内推理：typed `Questions` / `Answers`，不经过 HTTP 与序列化。
 - `InferenceEngine`：一个对象串起 hub、manifest、后端 factory、注册表与 typed 推理。
 - typed 扩展：长上下文扫描、`min_confidence` abstention 与 act-head 概率。
+- 多模型族（candle）：Laya、NLI（ModernBERT zero-shot）与 GLiClass（32M edge）。
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
 - 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
 - 纯 NumPy 的 Laya→ONNX 导出器，与官方 golden logits 最大误差 2.5e-6。
@@ -32,6 +33,10 @@
 | [`sys1-core`](crates/sys1-core/README.zh-CN.md) | `DecisionModel`、注册表、manifest、进程内 API、设备选择 |
 | [`sys1-hub`](crates/sys1-hub/README.zh-CN.md) | 模型源与缓存（Local / HF / ModelScope / HTTP） |
 | [`sys1-laya`](crates/sys1-laya/README.zh-CN.md) | clean-room Laya 实现、Router、ONNX 导出路径 |
+| [`sys1-modernbert`](crates/sys1-modernbert/README.zh-CN.md) | 共享 candle ModernBERT 编码器 |
+| [`sys1-nli`](crates/sys1-nli/README.zh-CN.md) | ModernBERT zero-shot NLI 决策模型 |
+| [`sys1-gliclass`](crates/sys1-gliclass/README.zh-CN.md) | GLiClass uni-encoder 决策模型（32M edge） |
+| [`sys1-families`](crates/sys1-families/README.zh-CN.md) | Laya/NLI/GLiClass 的族识别与分发 |
 | [`sys1-ort`](crates/sys1-ort/README.zh-CN.md) | 动态加载的 ONNX Runtime session 与 token-scoring 层 |
 | [`sys1-server`](crates/sys1-server/README.zh-CN.md) | axum `/v1/*` 与 `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.zh-CN.md) | `sys1` 二进制：serve/pull/list/show/rm/run/doctor |
@@ -103,6 +108,10 @@ sys1 serve --model laya-multilingual=local:/path/to/laya-multilingual
 # Laya 仓库根目录：自动注册 laya-english / laya-multilingual /
 # laya-typed-decisions，并启用 laya-latest Router
 sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
+
+# 小型 candle 模型族（从 checkpoint config 自动识别）：
+sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
 ```
 
 默认绑定 `127.0.0.1:8080`。可选 Bearer：
@@ -551,6 +560,13 @@ cargo test --offline -p sys1-hub --test live -- --nocapture
 uv sync --all-extras
 uv run --package sys1-tools --group dev ruff check python/tools
 uv run sys1-generate-scoring-stub
+
+# 小型 candle 模型族：NLI 与 GLiClass 对上游 Python 参考
+$env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
+cargo test -p sys1-nli --test nli -- --ignored --nocapture
+$env:SYS1_GLICLASS_TEST_DIR="D:/models/gliclass-edge"
+cargo test -p sys1-gliclass --test gliclass -- --ignored --nocapture
+cargo test -p sys1 --test families -- --ignored --nocapture
 ```
 
 导出器在三个 checkpoint 上的 logits 与官方 golden 最大误差 2.5e-6；

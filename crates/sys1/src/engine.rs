@@ -6,11 +6,8 @@ use sys1_core::{
     ModelManifest, ModelRegistry, ModelResolver, Prediction, PredictionOptions, Questions,
     RegistryConfig,
 };
+use sys1_families::{FamilyFactory, is_supported_directory, local_manifest, register_bundle};
 use sys1_hub::{CacheResidency, Hub, HubConfig, HubError, ModelRef};
-use sys1_laya::{
-    LayaFactory as CheckpointFactory, is_model_directory, local_checkpoint_manifest,
-    register_checkpoint_bundle,
-};
 use sys1_protocol::{ModelMetadata, State, SystemOneResponse};
 use thiserror::Error;
 
@@ -70,7 +67,7 @@ pub enum EngineError {
 /// over HTTP.
 pub struct InferenceEngine {
     hub: Hub,
-    factory: Arc<CheckpointFactory>,
+    factory: Arc<FamilyFactory>,
     registry: Arc<ModelRegistry>,
     options: ModelOptions,
     catalog_lock: Mutex<()>,
@@ -93,7 +90,7 @@ impl InferenceEngine {
             model,
         } = options;
         let hub = Hub::new(hub)?;
-        let factory = Arc::new(CheckpointFactory::new());
+        let factory = Arc::new(FamilyFactory::new());
         let registry = Arc::new(ModelRegistry::new(Vec::new(), factory.clone(), registry)?);
         hub.set_residency(Arc::new(RegistryResidency(registry.clone())));
         Ok(Self {
@@ -147,7 +144,7 @@ impl InferenceEngine {
         };
         let removed = self.registry.unregister(&canonical);
         if removed {
-            let _ = self.factory.unregister(&canonical);
+            let _ = self.factory.release(&canonical);
         }
         removed
     }
@@ -301,7 +298,7 @@ impl InferenceEngine {
                 for resolved_name in &resolved {
                     if !pre_existing.contains(resolved_name) {
                         self.registry.unregister(resolved_name);
-                        let _ = self.factory.unregister(resolved_name);
+                        let _ = self.factory.release(resolved_name);
                     }
                 }
                 return Err(error.into());
@@ -320,7 +317,10 @@ impl InferenceEngine {
         let (manifest, directory) = if parsed.scheme == "local" {
             let path = PathBuf::from(&parsed.location);
             if path.is_dir() && !path.join("model.json").is_file() {
-                let (manifest, _) = local_checkpoint_manifest(&path)?;
+                let (manifest, _) = match local_manifest(&path) {
+                    Ok(value) => value,
+                    Err(_) => sys1_laya::local_checkpoint_manifest(&path)?,
+                };
                 (manifest, path)
             } else {
                 let pulled = self.hub.pull(reference)?;
@@ -330,17 +330,17 @@ impl InferenceEngine {
             let pulled = self.hub.pull(reference)?;
             (pulled.manifest, pulled.directory)
         };
-        if !is_model_directory(&directory) {
+        if !is_supported_directory(&directory) {
             return Err(ModelError::unsupported(format!(
-                "`{reference}` is not a Laya checkpoint directory (safetensors or ONNX)"
+                "`{reference}` is not a supported model directory (Laya, NLI, or GLiClass)"
             ))
             .into());
         }
-        Ok(register_checkpoint_bundle(
+        Ok(register_bundle(
             &self.factory,
             &manifest,
             &directory,
-            self.options.clone(),
+            &self.options,
             name,
         )?)
     }
@@ -363,7 +363,7 @@ impl ModelResolver for InferenceEngine {
     }
 
     fn release(&self, name: &str) -> bool {
-        self.factory.unregister(name)
+        self.factory.release(name)
     }
 }
 

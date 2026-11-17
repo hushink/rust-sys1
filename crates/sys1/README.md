@@ -11,10 +11,11 @@ and provides `InferenceEngine`, which wires all core components together.
 sys1 = { path = "../sys1" }
 ```
 
-Default features: `laya`, `hub`. Optional backend/accelerator features: `onnx`,
+Default features: `laya`, `hub`, `families`. `families` adds the shared
+Laya/NLI/GLiClass dispatcher. Optional backend/accelerator features: `onnx`,
 `cuda`, `cudnn`, `metal`, `accelerate`, and the ONNX Runtime execution
 providers `ort-cuda`, `ort-tensorrt`, `ort-directml`, `ort-coreml`.
-`InferenceEngine` requires both `laya` and `hub` (the default set).
+`InferenceEngine` requires `laya`, `hub`, and `families` (the default set).
 
 ## Example
 
@@ -36,6 +37,10 @@ let tone = output.answers.choice("tone")?;
 let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`InferenceEngine` also accepts NLI and GLiClass directories; the family is
+detected from the checkpoint. Use the catalog name returned by `models()` (or
+the directory name) as the `predict` model argument.
 
 The direct checkpoint API is unchanged and remains available alongside the
 engine:
@@ -86,8 +91,9 @@ contract and `onnx.json` options. `sys1::ort` re-exports the raw
 - `InferenceEngine::new` starts empty; `from_reference` and `from_directory`
   register a model immediately.
 - `add` / `add_as` pull references through the hub, materialize the checkpoint,
-  register the backend, and add manifests to the registry. A repository root
-  registers a router plus its variants.
+  register the backend, and add manifests to the registry. A Laya repository
+  root registers a router plus its variants; NLI and GLiClass directories are
+  auto-detected.
 - `load` / `unload` / `loaded_models` / `is_loaded` control residency;
   `models` / `model` inspect the catalog; `remove` unloads and unregisters.
 - `predict` returns typed `DecisionOutput`; `systemone` returns the official
@@ -102,7 +108,7 @@ contract and `onnx.json` options. `sys1::ort` re-exports the raw
   `sys1-server`'s `router_with_resolver` for runtime `/api/models` support.
 
 Lower-level access is still available through `sys1::core`, `sys1::protocol`,
-`sys1::hub`, and `sys1::laya`.
+`sys1::hub`, `sys1::laya`, and `sys1::families`.
 
 ## Re-exports
 
@@ -110,6 +116,7 @@ Lower-level access is still available through `sys1::core`, `sys1::protocol`,
 - `sys1::protocol` — all of `sys1-protocol`
 - `sys1::hub` — all of `sys1-hub` (feature `hub`)
 - `sys1::laya` — all of `sys1-laya` (feature `laya`)
+- `sys1::families` — all of `sys1-families` (feature `families`)
 - `sys1::ort` — ONNX Runtime session layer (feature `onnx`)
 - Flat aliases: `DecisionModel`, `ModelResolver`, `ModelRegistry`,
   `ModelManifest`, `Questions`, `Answers`, `State`, `Question`, `Answer`,
