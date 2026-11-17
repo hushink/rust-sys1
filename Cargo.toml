@@ -19,6 +19,7 @@ tokio = { version = "1", default-features = false, features = ["rt-multi-thread"
 tower-http = { version = "0.6", default-features = false, features = ["cors", "trace"] }
 tower = { version = "0.5", features = ["util"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 

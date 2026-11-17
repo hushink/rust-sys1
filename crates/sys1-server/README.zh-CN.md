@@ -172,7 +172,8 @@ trace id 会保留；服务端生成新的 64-bit span id，并保留 sampled �
 ## 行为
 
 - 设置 `ServerConfig::api_key` 时启用 Bearer 认证。
-- 请求体上限 32 MiB；支持 gzip 解压；zstd 返回 `415`。
+- 请求体压缩前后均限制 32 MiB；`gzip` 与 `zstd` 在进程内解压；损坏的帧返回
+  `400`，解压后超限返回 `413`。
 - 响应带 `x-typesafe-request-id`。
 - 校验失败 `422 {"detail": [...]}`。
 - 未知模型 `400 {"detail": "..."}`。

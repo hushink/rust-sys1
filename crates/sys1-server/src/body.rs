@@ -3,6 +3,7 @@ use axum::body::{Bytes, to_bytes};
 use axum::extract::Request;
 use axum::http::{HeaderMap, header::CONTENT_ENCODING};
 use flate2::read::GzDecoder;
+use ruzstd::decoding::StreamingDecoder;
 use std::io::Read;
 
 pub(crate) async fn read_body(
@@ -45,9 +46,19 @@ pub(crate) async fn read_body(
             Bytes::from(decoded)
         }
         Some("zstd") => {
-            return Err(ApiError::unsupported_encoding(
-                "Content-Encoding zstd is not available in this build",
-            ));
+            let decoder = StreamingDecoder::new(bytes.as_ref())
+                .map_err(|error| ApiError::bad_request(format!("malformed zstd body: {error}")))?;
+            let mut decoded = Vec::new();
+            decoder
+                .take(max_body_bytes as u64 + 1)
+                .read_to_end(&mut decoded)
+                .map_err(|error| ApiError::bad_request(format!("malformed zstd body: {error}")))?;
+            if decoded.len() > max_body_bytes {
+                return Err(ApiError::payload_too_large(format!(
+                    "decompressed request body exceeds {max_body_bytes} bytes"
+                )));
+            }
+            Bytes::from(decoded)
         }
         Some(other) => {
             return Err(ApiError::unsupported_encoding(format!(

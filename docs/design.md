@@ -214,7 +214,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 ### 实现状态（2026-11-17）
 
 - 已完成：`sys1-protocol`、`sys1-core`、`sys1-hub`、`sys1-laya`、`sys1-server`、`sys1-cli`、`sys1`。
-- 已用本地缓存权重验证：`sys1 run`、`sys1 serve` 的 `/v1/models`、`/v1/systemone`、`/health`、gzip 请求；`laya-latest` 选中 English 并成功加载。
+- 已用本地缓存权重验证：`sys1 run`、`sys1 serve` 的 `/v1/models`、`/v1/systemone`、`/health`、gzip/zstd 请求；`laya-latest` 选中 English 并成功加载。
 - 已用本地缓存权重验证运行时管理：`/api/models` 列表、load/unload/reload、按 `local:` 引用动态添加、推理、删除；CPU F32 multilingual 冷加载约 12 s。
 - 已用本地回环 HTTP 模型中心验证：manifest 解析、相对文件 URL、Bearer token、Range 断点续传，以及 `[models]` 名称映射。
 - 已用本地假端点验证 HF（分页、子目录、LFS sha256、release date、token、URL 编码）与 ModelScope（Root/Recursive、token+cookie、3000 条截断拆分）。
@@ -236,7 +236,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 长上下文扫描：`DecisionModel::predict_long`、`LongContextOptions`、`WindowAttribution` 与 `sys1 run --long` 已实现；默认窗口受问题 state 余量限制、50% 重叠，`noul` 取最大、`choice`/`score` 取最自信窗口。英文 checkpoint 与官方 `predict_long` 的答案、act、窗口归因与 usage 对齐。细节见 ADR 0014。
 - Abstention：`PredictionOptions`/`MinConfidence` 支持标量与按 question type/选项数分桶的阈值，`DecisionOutput.abstentions` 保存 `passed`/`abstained`/`unevaluated` 与 `low_confidence`，答案 payload 与 wire 不变；`sys1 run --min-confidence` 输出官方同名字段。英文 checkpoint 的标量与 bucket gate 与官方一致。细节见 ADR 0015。
 - 真实上游：`sys1-hub` 的 `SYS1_LIVE_HUB=1` 测试可解析真实 HF 与 ModelScope manifest；受限网络可用 `HF_ENDPOINT=https://hf-mirror.com`。
-- 待补：zstd、parallel layout、ORT EP/TensorRT 实机、GPU CI。
+- 请求解压：gzip 与 zstd 均在进程内解压，压缩前后都受 `max_body_bytes` 限制；损坏帧返回 400，解压后超限返回 413（`ruzstd` 纯 Rust 后端）。
+- 待补：parallel layout、ORT EP/TensorRT 实机、GPU CI。
 
 ## 11. 已确认与遗留
 
@@ -250,7 +251,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 
 1. Laya 权重许可证：再分发前确认；v1 不内置权重。
 2. Laya 原生 confidence 的 HTTP 暴露方式：独立 `/api/*` 端点或响应头（v1.1）。
-3. zstd 请求压缩、ORT EP/TensorRT 实机、parallel layout；GPU CI。
+3. ORT EP/TensorRT 实机、parallel layout；GPU CI。
 
 ## 12. 决策索引
 

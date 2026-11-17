@@ -13,12 +13,13 @@
 - 官方 API 严格兼容：`POST /v1/systemone`、`GET /v1/models`；错误体使用官方 `detail` 形状。
 - 进程内推理：typed `Questions` / `Answers`，不经过 HTTP 与序列化。
 - `InferenceEngine`：一个对象串起 hub、manifest、后端 factory、注册表与 typed 推理。
+- typed 扩展：长上下文扫描、`min_confidence` abstention 与 act-head 概率。
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
 - 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
 - 纯 NumPy 的 Laya→ONNX 导出器，与官方 golden logits 最大误差 2.5e-6。
 - 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁、按字节配额 LRU 淘汰。
-- 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理。
+- 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理、gzip/zstd 请求。
 - 运行时模型管理：无需重启即可加载、卸载、重载、添加和移除模型。
 - 可观测性：Prometheus/JSON 指标、可替换 telemetry、W3C `traceparent`、text/JSON/文件日志。
 - 加速器 feature 骨架：CPU / CUDA / cuDNN / Metal / Accelerate。
@@ -332,7 +333,7 @@ let billing = output.answers.noul("billing")?;
 - 校验失败 `422 {"detail": [...]}`；未知模型 `400 {"detail": "..."}`。
 - `box` 问题与图片 `assets` 会被解析，但 Laya 返回 `422 unsupported`；缺少
   `TypeSafe-Danger-Zone-Images: true` 返回 `400`。
-- 请求体上限 32 MiB；支持 gzip；当前构建对 zstd 返回 `415`。
+- 请求体压缩前后均限制 32 MiB；支持 gzip 与 zstd 请求体；损坏的帧返回 `400`。
 - `/v1` 与普通 `predict` 对超长 state 返回 `400 max_tokens_exceeded`，不会静默
   截断；typed `predict_long` / `sys1 run --long` 会用重叠窗口扫描。
 - `/v1/*` 默认 TypeSafe/ollaya 归一化 confidence；`--laya-confidence laya` 切换为
@@ -574,7 +575,6 @@ cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 
 ## 已知缺口 / Roadmap
 
-- zstd 请求压缩。
 - TensorRT EP 的 CI 需要安装了 TensorRT 的 self-hosted GPU runner。
 - 上游发布的 Laya ONNX 产物。仓库内的导出器已能本地生成并完成 golden 对齐；
   TensorRT 仍只能通过 ORT TensorRT EP 使用。

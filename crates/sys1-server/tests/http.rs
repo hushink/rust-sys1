@@ -522,6 +522,43 @@ async fn gzip_request_is_decompressed() {
 }
 
 #[tokio::test]
+async fn zstd_request_is_decompressed() {
+    let body = noul_body();
+    let compressed = ruzstd::encoding::compress_to_vec(
+        body.as_bytes(),
+        ruzstd::encoding::CompressionLevel::Fastest,
+    );
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/systemone")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_ENCODING, "zstd")
+        .body(Body::from(compressed))
+        .expect("request");
+    let (status, _, body) = send(app(ServerConfig::default()), request).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+}
+
+#[tokio::test]
+async fn malformed_zstd_is_rejected() {
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/systemone")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_ENCODING, "zstd")
+        .body(Body::from("not a zstd frame"))
+        .expect("request");
+    let (status, _, body) = send(app(ServerConfig::default()), request).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert!(
+        value["detail"].as_str().unwrap().contains("zstd"),
+        "{value}"
+    );
+}
+
+#[tokio::test]
 async fn health_is_open() {
     let request = Request::builder()
         .method("GET")

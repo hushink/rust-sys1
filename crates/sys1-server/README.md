@@ -183,7 +183,9 @@ request/model/cache telemetry events and in the `systemone` tracing span.
 ## Behavior
 
 - Bearer auth is enabled when `ServerConfig::api_key` is set.
-- Request bodies are limited to 32 MiB; gzip is decompressed; zstd returns `415`.
+- Request bodies are limited to 32 MiB compressed and decompressed. `gzip` and
+  `zstd` are decompressed in-process; malformed frames return `400`, and an
+  oversized decoded body returns `413`.
 - Responses include `x-typesafe-request-id`.
 - Validation failures use `422 {"detail": [...]}`.
 - Unknown models use `400 {"detail": "..."}`.

@@ -13,12 +13,13 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Strict official API: `POST /v1/systemone`, `GET /v1/models`; official `detail` error shape.
 - Process-in inference: typed `Questions` / `Answers`, no HTTP or serialization required.
 - `InferenceEngine`: one object wires the hub, manifest, backend factory, registry, and typed inference.
+- Typed extensions: long-context scanning, `min_confidence` abstention, and act-head probabilities.
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
 - Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
 - Pure NumPy Laya-to-ONNX exporter with official golden logits within 2.5e-6.
 - Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock, byte quota with LRU eviction.
-- Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference.
+- Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference, gzip/zstd requests.
 - Runtime model management: load, unload, reload, and add/remove models without restarting.
 - Observability: Prometheus/JSON metrics, replaceable telemetry, W3C `traceparent`, text/JSON/file logs.
 - Accelerator feature skeleton: CPU / CUDA / cuDNN / Metal / Accelerate.
@@ -355,7 +356,8 @@ at the crate root; `InferenceEngine` is an additive convenience layer.
 - Validation errors use `422 {"detail": [...]}`; unknown models use `400 {"detail": "..."}`.
 - `box` questions and image `assets` are parsed but Laya returns `422 unsupported`; missing
   `TypeSafe-Danger-Zone-Images: true` returns `400`.
-- Request limit is 32 MiB. gzip is supported; zstd currently returns `415` in this build.
+- Request limit is 32 MiB compressed and decompressed. gzip and zstd request
+  bodies are supported; malformed frames return `400`.
 - Long state returns `400` with `max_tokens_exceeded` from `/v1` and ordinary
   `predict`; typed `predict_long` / `sys1 run --long` scan it in overlapping
   windows instead.
@@ -619,7 +621,6 @@ cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 
 ## Known gaps / roadmap
 
-- zstd request compression.
 - TensorRT EP CI requires a self-hosted GPU runner with TensorRT installed.
 - A published upstream Laya ONNX artifact. The repository exporter now produces
   parity-checked models locally; TensorRT remains available only through the
