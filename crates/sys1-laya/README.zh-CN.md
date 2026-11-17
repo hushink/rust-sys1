@@ -89,12 +89,11 @@ session 时动态加载：设置 `ORT_DYLIB_PATH` 指向 `onnxruntime` 共享库
 产物；仓库提供纯 NumPy/ONNX 导出器（不依赖 PyTorch）：
 
 ```bash
-uv run --with onnx --with safetensors --with numpy --python 3.13 \
-  ../../scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+uv run --extra onnx sys1-export-onnx \
+  /path/to/laya-multilingual /path/to/laya-onnx
 
-uv run --with onnxruntime --with numpy --python 3.13 \
-  ../../scripts/check_laya_onnx.py /path/to/laya-onnx \
-  /path/to/golden/multilingual/case_dict_state.json
+uv run --extra check sys1-check-onnx \
+  /path/to/laya-onnx /path/to/golden/multilingual/case_dict_state.json
 ```
 
 导出器写出 F32 权重（multilingual 约 1.2 GiB，大模型约 1.6 GiB），复制

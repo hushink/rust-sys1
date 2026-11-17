@@ -24,8 +24,8 @@ When the checkpoint contains `act_head.*`, the exporter also writes
 
 Usage:
 
-    uv run --with onnx --with safetensors --with numpy --python 3.13 \
-      scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+    uv run --extra onnx sys1-export-onnx \
+      /path/to/laya-multilingual /path/to/laya-onnx
 
 The output directory receives `model.onnx`, `onnx.json`, `rl_agent_config.json`,
 and the tokenizer files, so it can be served directly by `sys1 serve`.
@@ -91,9 +91,7 @@ class Builder:
         **attrs,
     ) -> str | list[str]:
         names = [self.name(hint or op_type.lower()) for _ in range(outputs)]
-        self.nodes.append(
-            helper.make_node(op_type, inputs, names, name=names[0], **attrs)
-        )
+        self.nodes.append(helper.make_node(op_type, inputs, names, name=names[0], **attrs))
         return names[0] if outputs == 1 else names
 
     def alias(self, x: str, name: str) -> str:
@@ -205,14 +203,9 @@ class Weights:
         return np.asarray(self._file.get_tensor(key), dtype=np.float32)
 
 
-def rope_tables(
-    max_positions: int, head_dim: int, theta: float
-) -> tuple[np.ndarray, np.ndarray]:
+def rope_tables(max_positions: int, head_dim: int, theta: float) -> tuple[np.ndarray, np.ndarray]:
     inv_freq = np.array(
-        [
-            1.0 / np.float32(theta ** (index / head_dim))
-            for index in range(0, head_dim, 2)
-        ],
+        [1.0 / np.float32(theta ** (index / head_dim)) for index in range(0, head_dim, 2)],
         dtype=np.float32,
     )
     positions = np.arange(max_positions, dtype=np.float32).reshape(-1, 1)
@@ -468,9 +461,7 @@ def build_model(checkpoint: Path) -> onnx.ModelProto:
     local_window = int(config["local_attention"]) // 2
     max_positions = int(config["max_position_embeddings"])
     rope_global = float(
-        config.get("rope_parameters", {})
-        .get("full_attention", {})
-        .get("rope_theta", 10000.0)
+        config.get("rope_parameters", {}).get("full_attention", {}).get("rope_theta", 10000.0)
     )
     rope_local = float(
         config.get("rope_parameters", {})
@@ -487,9 +478,7 @@ def build_model(checkpoint: Path) -> onnx.ModelProto:
     cos_local, sin_local = rope_tables(max_positions, head_dim, rope_local)
 
     b = Builder()
-    input_ids = helper.make_tensor_value_info(
-        "input_ids", TensorProto.INT64, ["batch", "seq"]
-    )
+    input_ids = helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["batch", "seq"])
     attention_mask_input = helper.make_tensor_value_info(
         "attention_mask", TensorProto.INT64, ["batch", "seq"]
     )
@@ -532,9 +521,7 @@ def build_model(checkpoint: Path) -> onnx.ModelProto:
         )
         uses_local = index % global_every != 0
         mask = local_mask_name if uses_local else masks["padding4"]
-        cos4, sin4 = (
-            (cos4_local, sin4_local) if uses_local else (cos4_global, sin4_global)
-        )
+        cos4, sin4 = (cos4_local, sin4_local) if uses_local else (cos4_global, sin4_global)
         attention = encoder_attention(
             b,
             attention_norm,
@@ -646,9 +633,7 @@ def build_model(checkpoint: Path) -> onnx.ModelProto:
         [input_ids, attention_mask_input, type_ids, markers],
         [
             helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["n"]),
-            helper.make_tensor_value_info(
-                "pooled", TensorProto.FLOAT, ["batch", "hidden"]
-            ),
+            helper.make_tensor_value_info("pooled", TensorProto.FLOAT, ["batch", "hidden"]),
         ],
     )
 
@@ -706,7 +691,24 @@ def copy_model_assets(checkpoint: Path, output: Path, has_act_head: bool) -> Non
         sidecar.write_text(json.dumps(data, indent=2) + "\n")
 
 
-def main() -> None:
+def run(checkpoint: Path, output: Path, skip_assets: bool = False) -> int:
+    """Export `checkpoint` into `output`; returns a process exit code."""
+    act_head = act_head_weights(checkpoint)
+    model = build_model(checkpoint)
+    output.mkdir(parents=True, exist_ok=True)
+    target = output / "model.onnx"
+    onnx.save(model, target)
+    if act_head is not None and not skip_assets:
+        save_safetensors(act_head, output / "act_head.safetensors")
+    if not skip_assets:
+        copy_model_assets(checkpoint, output, act_head is not None)
+    print(f"wrote {target} ({target.stat().st_size / 1024 / 1024:.1f} MiB)")
+    if not skip_assets:
+        print(f"ready to serve: {output}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path, help="Laya safetensors checkpoint")
     parser.add_argument("output", type=Path, help="output directory for the ONNX export")
@@ -715,21 +717,9 @@ def main() -> None:
         action="store_true",
         help="write only model.onnx (do not copy tokenizer/config/sidecar)",
     )
-    args = parser.parse_args()
-
-    act_head = act_head_weights(args.checkpoint)
-    model = build_model(args.checkpoint)
-    args.output.mkdir(parents=True, exist_ok=True)
-    target = args.output / "model.onnx"
-    onnx.save(model, target)
-    if act_head is not None and not args.skip_assets:
-        save_safetensors(act_head, args.output / "act_head.safetensors")
-    if not args.skip_assets:
-        copy_model_assets(args.checkpoint, args.output, act_head is not None)
-    print(f"wrote {target} ({target.stat().st_size / 1024 / 1024:.1f} MiB)")
-    if not args.skip_assets:
-        print(f"ready to serve: {args.output}")
+    args = parser.parse_args(argv)
+    return run(args.checkpoint, args.output, args.skip_assets)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

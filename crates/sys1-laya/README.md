@@ -94,12 +94,11 @@ No official Laya ONNX artifact is published yet. The repository includes a
 pure NumPy/ONNX exporter (no PyTorch) that implements the contract above:
 
 ```bash
-uv run --with onnx --with safetensors --with numpy --python 3.13 \
-  ../../scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+uv run --extra onnx sys1-export-onnx \
+  /path/to/laya-multilingual /path/to/laya-onnx
 
-uv run --with onnxruntime --with numpy --python 3.13 \
-  ../../scripts/check_laya_onnx.py /path/to/laya-onnx \
-  /path/to/golden/multilingual/case_dict_state.json
+uv run --extra check sys1-check-onnx \
+  /path/to/laya-onnx /path/to/golden/multilingual/case_dict_state.json
 ```
 
 The exporter writes F32 weights (~1.2 GiB for multilingual, ~1.6 GiB for the

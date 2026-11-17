@@ -113,7 +113,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 超长 state 的 v1 行为待确认：建议返回 400，detail 含 `max_tokens_exceeded`（不做静默截断）。
 - 跨请求 batching：并发请求经 mpsc 聚合，按模型分组后调用 `predict_batch`；默认 `max_batch=32`、`max_wait=2 ms`，GPU 单请求只付 500 µs yield grace。模型可用 `supports_cross_request_batching` 退出；CPU 上的 Laya 退出，因为独立 CPU 前向已经使用线程池。进程内接口不自动批处理，调用方可直接使用 `predict_batch`。细节见 ADR 0006。
 - GPU 精度档位：默认 F32；`--dtype f16` 在 Ampere+ 上提高高并发吞吐，抽查概率差异 ~5e-4；`--tf32` 为 F32 GEMM 启用 TF32，收益在波动范围内。
-- 压测：`crates/sys1-cli/examples/loadgen.rs` 提供闭环与开环（固定 offered rate、in-flight permit）两种模式；Python/PowerShell 客户端不计入库 API。
+- 压测：`crates/sys1-cli/examples/loadgen.rs` 提供闭环与开环（固定 offered rate、in-flight permit）两种模式；Python 工具 `sys1-bench` 不计入库 API。
 - 长上下文：CUDA 上 local 层在 ≥512 token 时使用精确分块窗口 attention（128 query/块、±local window K/V、padding key mask）；932 token F16 从 ~194 降到 ~141 ms（1.38x），F32 从 ~185 降到 ~142 ms（1.30x），F32 答案差 0、F16 最大 ~6e-4。CPU 继续 eager。FlashAttention 原型在 932 token 下 ~69 ms，但输出与 eager/F32 不一致，未启用；上游完整 kernel 在 CUDA 13.4/Windows 上 cicc 崩溃。CPU int8/Q8_0 探测收益不足，未集成；MKL crate 不在离线缓存。
 
 ## 5. 模型、manifest 与 hub
@@ -227,7 +227,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 可替换 telemetry 与 trace context 已实现：`Telemetry` 事件、`TracingTelemetry`、`ServerExtensions` 注入、`traceparent` 响应头；CLI text/JSON/文件日志。测试覆盖自定义 telemetry、trace id 透传、batch 事件与 JSON 日志文件。
 - 配置热加载已实现：CLI 只应用 `[models]` 增删，新增项标记 `configured`；server 设置/引用变化 409，解析失败 400 且不改目录。真实进程验证 add 92 ms、remove、restart-required 409。
 - 可选 ORT backend 已实现：`sys1-ort` 负责动态 session 与 token-scoring 契约；`sys1-laya/onnx` 共享 tokenization/校准/答案格式化，只替换前向图；`onnx.json` 可覆盖 I/O 名、线程与 `max_batch`。已用合成 ONNX 图验证 batching、padding、marker 索引、factory 与 HTTP 全链路；`ort 2.0.0-rc.15` 在 Windows 上以 `load-dynamic` 成功加载系统 ONNX Runtime 1.17；rc.15 的显式 Environment 生命周期避免了 rc.13 在进程退出时的偶发崩溃。
-- 纯 NumPy/ONNX 导出器已实现（`scripts/export_laya_onnx.py`，不依赖 PyTorch）：从 safetensors 生成符合契约的 encoder/type embedding/decision head/scorer 计算图，并自动复制 tokenizer、`rl_agent_config.json` 与 `onnx.json`。三个 checkpoint 的导出 logits 与官方 golden 最大误差 1.7e-6–2.5e-6；`scripts/check_laya_onnx.py` 可重复校验。Rust `onnx_parity` 测试比较 candle 与 ONNX 的完整答案。多 GB 导出建议 ONNX Runtime ≥1.20；Windows 1.17 加载 1.2 GiB 图不稳定，1.32 稳定。TensorRT EP CI 与上游官方 ONNX 产物仍待补。
+- 纯 NumPy/ONNX 导出器已实现（`python/tools` 的 `sys1-export-onnx`，不依赖 PyTorch）：从 safetensors 生成符合契约的 encoder/type embedding/decision head/scorer 计算图，并自动复制 tokenizer、`rl_agent_config.json` 与 `onnx.json`。三个 checkpoint 的导出 logits 与官方 golden 最大误差 1.7e-6–2.5e-6；`sys1-check-onnx` 可重复校验。Rust `onnx_parity` 测试比较 candle 与 ONNX 的完整答案。多 GB 导出建议 ONNX Runtime ≥1.20；Windows 1.17 加载 1.2 GiB 图不稳定，1.32 稳定。TensorRT EP CI 与上游官方 ONNX 产物仍待补。
 - 缓存配额与 LRU 淘汰已实现：`HubConfig::max_cache_bytes`、`Hub::cache_usage` / `cache_entries` / `enforce_quota`、`CacheResidency` 常驻保护；CLI `/api/cache` 与 `sys1 list` 输出 limit/used/free/reclaimable，`sys1 doctor` 输出配额状态。测试覆盖 LRU 顺序、常驻保护、超大模型拒绝、pull 触发淘汰与活动下载保护。ADR 0012。
 - 生产收尾：CORS allowlist/关闭与优雅关闭已实现并有测试；CLI Ctrl-C/SIGTERM 停止接收并 drain。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。

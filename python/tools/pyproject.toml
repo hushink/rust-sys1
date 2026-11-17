@@ -1,0 +1,36 @@
+[project]
+name = "sys1-tools"
+version = "0.1.0"
+description = "ONNX export/check, ORT fixtures, and HTTP benchmarks for rust-sys1"
+readme = "README.md"
+authors = [
+    { name = "hushink", email = "weilanzhuan@gmail.com" }
+]
+requires-python = ">=3.10,<3.15"
+license = "Apache-2.0"
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+onnx = ["numpy>=1.26", "onnx>=1.17", "safetensors>=0.4"]
+check = ["numpy>=1.26", "onnxruntime>=1.20"]
+all = ["numpy>=1.26", "onnx>=1.17", "safetensors>=0.4", "onnxruntime>=1.20"]
+
+[project.scripts]
+sys1-export-onnx = "sys1_tools.onnx_export:main"
+sys1-check-onnx = "sys1_tools.onnx_check:main"
+sys1-generate-scoring-stub = "sys1_tools.fixtures:main"
+sys1-bench = "sys1_tools.bench:main"
+
+[dependency-groups]
+dev = ["ruff>=0.9"]
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

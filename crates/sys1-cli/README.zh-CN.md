@@ -289,7 +289,7 @@ Gate 比较的是答案最大概率，而不是报告中的 confidence；该选�
 
 ```powershell
 $env:SYS1_BENCH_MODEL="C:/path/to/laya-multilingual"
-pwsh ./scripts/bench.ps1
+uv run sys1-bench
 ```
 
 结果见根 README。

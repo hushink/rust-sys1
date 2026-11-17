@@ -68,8 +68,9 @@ SYS1_REQUIRE_ORT=1 cargo test -p sys1-ort
 ```
 
 `tests/fixtures/scoring_stub.onnx` 是由
-`tests/fixtures/generate_scoring_stub.py` 生成的小型合成计算图。它返回每个 marker
-处的 token id，用于验证 batching、padding、marker 索引与输出提取。未设置
+`uv run --extra onnx sys1-generate-scoring-stub` 生成的小型合成计算图。
+它返回每个 marker 处的 token id 与 token 0 的 pooled 输出，用于验证 batching、
+padding、marker 索引、pooled 提取与 act-head 接线。未设置
 `SYS1_REQUIRE_ORT=1` 时，若 ONNX Runtime 无法加载则跳过测试。
 
 ## 范围

@@ -3,11 +3,10 @@
 
 Usage:
 
-    uv run --with onnxruntime --with numpy --python 3.13 \
-      scripts/check_laya_onnx.py /path/to/laya-onnx \
-      /path/to/golden/multilingual/case_dict_state.json
+    uv run --extra check sys1-check-onnx \
+      /path/to/laya-onnx /path/to/golden/multilingual/case_dict_state.json
 
-The exported directory is the one produced by `export_laya_onnx.py`. The
+The exported directory is the one produced by `sys1-export-onnx`. The
 golden file provides `batch.input_ids`, `attention_mask`, `marker_pos`,
 `marker_mask`, `qtype`, and the expected `logits`.
 """
@@ -36,14 +35,9 @@ def flattened_markers(batch: dict, seq: int) -> tuple[list[int], list[tuple[int,
     return markers, locations
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("onnx", type=Path, help="exported Laya ONNX directory")
-    parser.add_argument("golden", type=Path, help="official case_dict_state.json")
-    parser.add_argument("--tolerance", type=float, default=1e-4)
-    args = parser.parse_args()
-
-    with args.golden.open(encoding="utf-8") as handle:
+def run(onnx_dir: Path, golden: Path, tolerance: float = 1e-4) -> int:
+    """Check an exported model against the golden logits; returns an exit code."""
+    with golden.open(encoding="utf-8") as handle:
         case = json.load(handle)
     batch = case["batch"]
     input_ids = np.asarray(batch["input_ids"], dtype=np.int64)
@@ -53,9 +47,7 @@ def main() -> int:
         raise ValueError(f"expected input_ids [batch, seq], got {input_ids.shape}")
     markers, locations = flattened_markers(batch, int(input_ids.shape[1]))
 
-    session = ort.InferenceSession(
-        str(args.onnx / "model.onnx"), providers=["CPUExecutionProvider"]
-    )
+    session = ort.InferenceSession(str(onnx_dir / "model.onnx"), providers=["CPUExecutionProvider"])
     logits, pooled = session.run(
         ["logits", "pooled"],
         {
@@ -80,7 +72,7 @@ def main() -> int:
     print(f"markers: {len(markers)}")
     print(f"pooled: {tuple(pooled.shape)}")
     print(f"max |onnx - golden|: {worst:.9g}")
-    if worst > args.tolerance:
+    if worst > tolerance:
         worst_index = int(difference.argmax())
         print(
             f"mismatch at marker {worst_index}: "
@@ -90,6 +82,15 @@ def main() -> int:
         return 1
     print("ok")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("onnx", type=Path, help="exported Laya ONNX directory")
+    parser.add_argument("golden", type=Path, help="official case_dict_state.json")
+    parser.add_argument("--tolerance", type=float, default=1e-4)
+    args = parser.parse_args(argv)
+    return run(args.onnx, args.golden, args.tolerance)
 
 
 if __name__ == "__main__":

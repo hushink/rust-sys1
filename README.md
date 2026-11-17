@@ -37,7 +37,10 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 | [`sys1-cli`](crates/sys1-cli/README.md) | `sys1` binary: serve/pull/list/show/rm/run/doctor |
 | [`sys1`](crates/sys1/README.md) | Umbrella in-process engine API |
 
-Each crate has an English `README.md` and a Chinese `README.zh-CN.md`.
+The Python workspace lives in [`python/tools`](python/tools/README.md) and is
+managed by uv: ONNX export/check, the ORT fixture generator, and the HTTP
+benchmark. Each crate has an English `README.md` and a Chinese
+`README.zh-CN.md`; the Python package does too.
 
 ## Quick start
 
@@ -45,6 +48,10 @@ Each crate has an English `README.md` and a Chinese `README.zh-CN.md`.
 
 ```bash
 cargo build --release -p sys1-cli
+
+# Python tools (uv workspace, Python 3.10-3.14)
+uv sync --all-extras
+uv run sys1-bench --help
 ```
 
 CPU is the default. CUDA / cuDNN / Metal builds:
@@ -76,12 +83,11 @@ An ONNX export instead provides `model.onnx` (or the file named by
 PyTorch), then check it against the official golden logits:
 
 ```bash
-uv run --with onnx --with safetensors --with numpy --python 3.13 \
-  scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+uv run --extra onnx sys1-export-onnx \
+  /path/to/laya-multilingual /path/to/laya-onnx
 
-uv run --with onnxruntime --with numpy --python 3.13 \
-  scripts/check_laya_onnx.py /path/to/laya-onnx \
-  /path/to/golden/multilingual/case_dict_state.json
+uv run --extra check sys1-check-onnx \
+  /path/to/laya-onnx /path/to/golden/multilingual/case_dict_state.json
 ```
 
 All three checkpoints matched the official golden logits with max
@@ -544,22 +550,22 @@ convolutional layers.
 ```powershell
 # CPU: Laya automatically opts out of cross-request batching
 $env:SYS1_BENCH_MODEL="C:/path/to/laya-multilingual"
-pwsh ./scripts/bench.ps1 -Device cpu -Dtype f32 -UniqueStates -OptionSweep -ConcurrencySweep
+uv run sys1-bench --device cpu --dtype f32 --unique-states --option-sweep --concurrency-sweep
 
 # CUDA: build with the Visual Studio environment first
 cargo build --release --offline -p sys1-cli --features cuda --target-dir target-cuda
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f32 -UniqueStates -ConcurrencySweep
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f32 --unique-states --concurrency-sweep
 
 # High-throughput F16, or optional TF32 for F32
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f16 -UniqueStates -ConcurrencySweep
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f32 -Tf32 -UniqueStates
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f16 --unique-states --concurrency-sweep
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f32 --tf32 --unique-states
 
 # Unbatched baseline for comparison
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f32 -UniqueStates -NoBatch
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f32 --unique-states --no-batch
 ```
 
 ## Testing
@@ -584,6 +590,11 @@ $env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/ro
 cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
 $env:SYS1_LIVE_HUB="1"
 cargo test --offline -p sys1-hub --test live -- --nocapture
+
+# Python tools (uv workspace)
+uv sync --all-extras
+uv run --package sys1-tools --group dev ruff check python/tools
+uv run sys1-generate-scoring-stub
 ```
 
 The exporter produced logits within 2.5e-6 of the official golden vectors for

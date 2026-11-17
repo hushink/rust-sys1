@@ -17,9 +17,11 @@ shipping a large checkpoint.
 
 Run with:
 
-    uv run --with onnx --with numpy --python 3.13 python generate_scoring_stub.py
+    uv run --extra onnx sys1-generate-scoring-stub \
+      --output crates/sys1-ort/tests/fixtures/scoring_stub.onnx
 """
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -27,19 +29,16 @@ import onnx
 from onnx import TensorProto, helper, numpy_helper
 
 
-def main() -> None:
+def run(target: Path) -> int:
+    """Write the synthetic scoring graph to `target`; returns an exit code."""
     flat_shape = numpy_helper.from_array(np.array([-1], dtype=np.int64), "flat_shape")
     pooled_index = numpy_helper.from_array(np.array([0], dtype=np.int64), "pooled_index")
     pooled_axes = numpy_helper.from_array(np.array([1], dtype=np.int64), "pooled_axes")
-    input_ids = helper.make_tensor_value_info(
-        "input_ids", TensorProto.INT64, ["batch", "seq"]
-    )
+    input_ids = helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["batch", "seq"])
     attention_mask = helper.make_tensor_value_info(
         "attention_mask", TensorProto.INT64, ["batch", "seq"]
     )
-    type_ids = helper.make_tensor_value_info(
-        "type_ids", TensorProto.INT64, ["batch"]
-    )
+    type_ids = helper.make_tensor_value_info("type_ids", TensorProto.INT64, ["batch"])
     markers = helper.make_tensor_value_info("markers", TensorProto.INT64, ["n"])
     logits = helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["n"])
     pooled = helper.make_tensor_value_info("pooled", TensorProto.FLOAT, ["batch"])
@@ -50,9 +49,7 @@ def main() -> None:
         helper.make_node("Cast", ["selected"], ["logits"], to=TensorProto.FLOAT),
         helper.make_node("Gather", ["input_ids", "pooled_index"], ["first_token"], axis=1),
         helper.make_node("Squeeze", ["first_token", "pooled_axes"], ["first_token_squeezed"]),
-        helper.make_node(
-            "Cast", ["first_token_squeezed"], ["pooled"], to=TensorProto.FLOAT
-        ),
+        helper.make_node("Cast", ["first_token_squeezed"], ["pooled"], to=TensorProto.FLOAT),
     ]
     graph = helper.make_graph(
         nodes,
@@ -68,10 +65,31 @@ def main() -> None:
     )
     model.ir_version = 8
     onnx.checker.check_model(model)
-    target = Path(__file__).with_name("scoring_stub.onnx")
+    target.parent.mkdir(parents=True, exist_ok=True)
     onnx.save(model, target)
     print(f"wrote {target} ({target.stat().st_size} bytes)")
+    return 0
+
+
+def _default_output() -> Path:
+    relative = Path("crates/sys1-ort/tests/fixtures/scoring_stub.onnx")
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / relative
+        if candidate.parent.is_dir():
+            return candidate
+    raise SystemExit("pass --output when running outside the repository")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="target path (default: crates/sys1-ort/tests/fixtures/scoring_stub.onnx)",
+    )
+    args = parser.parse_args(argv)
+    return run(args.output or _default_output())
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

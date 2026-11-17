@@ -313,7 +313,7 @@ accepts per-bucket threshold maps.
 
 ```powershell
 $env:SYS1_BENCH_MODEL="C:/path/to/laya-multilingual"
-pwsh ./scripts/bench.ps1
+uv run sys1-bench
 ```
 
 See the root README for results.

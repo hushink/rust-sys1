@@ -28,3 +28,22 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  python:
+    name: Python tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Sync
+        run: uv sync --all-extras
+      - name: Lint
+        run: uv run --package sys1-tools --group dev ruff check python/tools
+      - name: Format
+        run: uv run --package sys1-tools --group dev ruff format --check python/tools
+      - name: Regenerate fixture
+        run: uv run sys1-generate-scoring-stub
+      - name: Fixture is current
+        run: git diff --exit-code

@@ -37,7 +37,9 @@
 | [`sys1-cli`](crates/sys1-cli/README.zh-CN.md) | `sys1` 二进制：serve/pull/list/show/rm/run/doctor |
 | [`sys1`](crates/sys1/README.zh-CN.md) | umbrella 进程内引擎 API |
 
-每个 crate 都提供英文 `README.md` 与中文 `README.zh-CN.md`。
+Python 工作区位于 [`python/tools`](python/tools/README.zh-CN.md)，由 uv 管理：
+ONNX 导出/校验、ORT fixture 生成与 HTTP 压测。每个 crate 都提供英文
+`README.md` 与中文 `README.zh-CN.md`；Python 包同样提供双语 README。
 
 ## 快速开始
 
@@ -45,6 +47,10 @@
 
 ```bash
 cargo build --release -p sys1-cli
+
+# Python 工具（uv workspace，Python 3.10-3.14）
+uv sync --all-extras
+uv run sys1-bench --help
 ```
 
 默认 CPU。CUDA / cuDNN / Metal：
@@ -74,12 +80,11 @@ tokenizer，以及可选的 `act_head.safetensors`。可用纯 NumPy/ONNX 导出
 PyTorch）生成，并对官方 golden logits 做校验：
 
 ```bash
-uv run --with onnx --with safetensors --with numpy --python 3.13 \
-  scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+uv run --extra onnx sys1-export-onnx \
+  /path/to/laya-multilingual /path/to/laya-onnx
 
-uv run --with onnxruntime --with numpy --python 3.13 \
-  scripts/check_laya_onnx.py /path/to/laya-onnx \
-  /path/to/golden/multilingual/case_dict_state.json
+uv run --extra check sys1-check-onnx \
+  /path/to/laya-onnx /path/to/golden/multilingual/case_dict_state.json
 ```
 
 三个 checkpoint 均与官方 golden logits 对齐，最大 `|ONNX - golden|` 在
@@ -501,22 +506,22 @@ ModernBERT 没有卷积算子，cuDNN 不会带来实质加速；实际相关的
 ```powershell
 # CPU：Laya 自动退出跨请求 batching
 $env:SYS1_BENCH_MODEL="C:/path/to/laya-multilingual"
-pwsh ./scripts/bench.ps1 -Device cpu -Dtype f32 -UniqueStates -OptionSweep -ConcurrencySweep
+uv run sys1-bench --device cpu --dtype f32 --unique-states --option-sweep --concurrency-sweep
 
 # CUDA：先在有 Visual Studio 环境的终端构建
 cargo build --release --offline -p sys1-cli --features cuda --target-dir target-cuda
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f32 -UniqueStates -ConcurrencySweep
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f32 --unique-states --concurrency-sweep
 
 # 高吞吐 F16，或 F32 + TF32
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f16 -UniqueStates -ConcurrencySweep
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f32 -Tf32 -UniqueStates
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f16 --unique-states --concurrency-sweep
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f32 --tf32 --unique-states
 
 # 关闭 batching 的基线
-pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
-  -Device cuda:0 -Dtype f32 -UniqueStates -NoBatch
+uv run sys1-bench --exe target-cuda/release/sys1.exe `
+  --device cuda:0 --dtype f32 --unique-states --no-batch
 ```
 
 ## 测试
@@ -541,6 +546,11 @@ $env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/ro
 cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
 $env:SYS1_LIVE_HUB="1"
 cargo test --offline -p sys1-hub --test live -- --nocapture
+
+# Python 工具（uv workspace）
+uv sync --all-extras
+uv run --package sys1-tools --group dev ruff check python/tools
+uv run sys1-generate-scoring-stub
 ```
 
 导出器在三个 checkpoint 上的 logits 与官方 golden 最大误差 2.5e-6；
