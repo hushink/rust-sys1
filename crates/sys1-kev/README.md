@@ -47,5 +47,18 @@ therefore use their own fitted temperature without extra configuration.
 
 ```bash
 $env:SYS1_KEV_TEST_DIR="C:/models/kev-0.8b"
+$env:SYS1_KEV_BASE_DIR="C:/models/qwen3.5-0.8b-base"
 cargo test --offline -p sys1-kev --test kev -- --ignored --nocapture
 ```
+
+The 4B checkpoint uses its own test (the base is resolved from `base/`):
+
+```bash
+$env:SYS1_KEV4B_TEST_DIR="C:/models/kev-4b"
+cargo test --release -p sys1-kev --test kev predicts_with_the_4b_checkpoint \
+  -- --ignored --nocapture
+```
+
+The 4B numbers match an independent PyTorch LoRA-merge + pointer-head
+reference within 1e-6 on the CPU F32 path; BF16 on a 12 GB CUDA card is within
+0.003.

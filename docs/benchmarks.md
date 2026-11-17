@@ -55,6 +55,7 @@ Qwen3.5 混合模型。
 | Qwen3Guard 0.6B | CUDA | 95.3 | 179.1 | 659.8 | 11.7 |
 | Kev 0.8B | CPU | 585.0 | 1627.6 | — | — |
 | Kev 0.8B | CUDA | 54.2 | 148.6 | 573.4 | 13.4 |
+| Kev 4B (BF16) | CUDA | 83.2 | 248.6 | 779.8 | 9.9 |
 | Decision 0.8B | CPU | 1124.3 | 3287.9 | 4937.8 | 1.56 |
 | Decision 0.8B | CUDA | 76.7 | 215.0 | 665.4 | 11.7 |
 
@@ -79,6 +80,28 @@ Decima 的选项行按 token 长度分组批处理：长度相同的选项共享
 scorer 前向，长度不同则保持独立，避免 padding 改变编码器的局部注意力。
 40 个选项在 Decima-small 上仍是 36 ms（CUDA），说明该优化把额外选项的
 编码次数从 40 次降到少数几组。
+
+## F16 与 cuDNN
+
+CUDA 构建分别使用 `--features cuda` 和 `--features cudnn`，dtype 均为 F16。
+`noul` 为单请求 p50（ms），`x8` 为 8 并发 40 次请求的吞吐（RPS）。
+
+| 模型 | CUDA noul | CUDA x8 | cuDNN noul | cuDNN x8 |
+|---|---:|---:|---:|---:|
+| NLI | 17.5 | 36.6 | 18.4 | 36.8 |
+| GLiClass | 11.2 | 72.3 | 16.4 | 72.0 |
+| Von | 25.0 | 27.9 | 26.2 | 27.8 |
+| Decima-small | 18.1 | 39.8 | 20.4 | 39.7 |
+| Decima-base | 39.4 | 16.9 | 34.7 | 17.2 |
+| Qwen3Guard | 77.6 | 16.6 | 77.1 | 16.6 |
+| Kev 0.8B | 54.3 | 13.1 | 51.9 | 13.2 |
+| Decision 0.8B | 63.6 | 11.7 | 61.2 | 11.7 |
+
+cuDNN 对 Decima-base 和 Qwen3.5 解码器有约 3–8% 的单请求收益，但会让
+GLiClass/Von/Decima-small 这类小编码器变慢（2%–45%）；x8 吞吐基本不变。
+因此默认 CUDA 构建即可，只有大模型或特定 GEMM 形状值得启用 cuDNN。
+构建 cuDNN 时需要把 `cudnn.lib` 所在目录加入 `LIB`（本机为
+`D:\Applications\cudnn-windows\lib\x64`），运行时 DLL 目录需在 `PATH`。
 
 ## 跨请求批处理
 
@@ -109,12 +132,19 @@ scorer 前向，长度不同则保持独立，避免 padding 改变编码器的�
   **77 ms**（约 57×），CPU 也分别从 785/1464 ms 降到 585/1124 ms。
   现在 Qwen3.5 家族在 CUDA 上比 CPU 快 10–15 倍。
 - **F16**：CUDA F16 路径在 NLI/Von/GLiClass 上暴露过 dtype 与 contiguous
-  问题，已修复（mask 转 dtype、encoder/scorer 输入 contiguous）。修复后
-  单请求 `noul` p50：NLI 15.7 ms、GLiClass 9.5 ms、Von 22.4 ms、
-  Decima-small 15.7 ms、Qwen3Guard 89.3 ms，均优于同模型 F32。卷积优化后
-  Kev F16 为 43.2 ms、Decision F16 为 61.3 ms，比 F32 再快约 20%。
+  问题，已修复（mask 转 dtype、encoder/scorer 输入 contiguous）。完整 F16
+  矩阵见上节；编码器与 Qwen3Guard 均优于 F32，Kev/Decision 也比 F32 再快
+  约 20%。cuDNN 没有稳定收益。
 - **Clef 9B**：权重约 18.8 GB，超出 12 GiB 显存；CPU F32 需要约 36 GB 内存。
   使用 BF16 CPU 的验证结果见下一节（下载/验证完成后更新）。
+
+## Kev 4B 验证
+
+`jaredpalmer/kev-4b`（adapter 124 MB）与 `Qwen/Qwen3.5-4B-Base`（两个分片，
+9.3 GB）的 SHA256 均与 Hugging Face 一致。CPU F32 与独立 PyTorch
+LoRA 合并 + pointer head 参考在 1e-6 内一致（billing 0.900975，refund
+0.853919，urgency 0.953128）；12 GB CUDA 卡上 BF16 的误差在 0.003 内，
+单请求 83 ms。4B 的 BF16 权重加 LoRA 合并后可以放入 12 GB 显存。
 
 ## Clef 9B 验证
 
@@ -132,6 +162,8 @@ cargo test --release -p sys1-clef --test clef matches_the_recorded_triage_decisi
 
 - 加载约 20 s，峰值工作集约 18–19 GB。
 - 单次 triage 请求（5 个问题）`predict` 耗时 **52.1 s**（CPU BF16，复测）。
+- 通过 `sys1 serve` 的 HTTP `/v1/systemone`：单 noul 请求 18.3 s，
+  noul+score+choice 三问 26.0 s（状态较短；证明服务和批处理路径可用）。
 - 决策与 Ollaya 记录的 `clef-flash-fp16` integration corpus 一致：
   `team=billing`、`refund/urgent/churn=true`、`upset` 的 argmax 为第 4 档
   （索引 3）。

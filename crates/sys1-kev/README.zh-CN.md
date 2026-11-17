@@ -44,5 +44,17 @@ kev/
 
 ```bash
 $env:SYS1_KEV_TEST_DIR="C:/models/kev-0.8b"
+$env:SYS1_KEV_BASE_DIR="C:/models/qwen3.5-0.8b-base"
 cargo test --offline -p sys1-kev --test kev -- --ignored --nocapture
 ```
+
+4B checkpoint 使用单独测试（base 从 `base/` 解析）：
+
+```bash
+$env:SYS1_KEV4B_TEST_DIR="C:/models/kev-4b"
+cargo test --release -p sys1-kev --test kev predicts_with_the_4b_checkpoint \
+  -- --ignored --nocapture
+```
+
+4B 的 CPU F32 输出与独立的 PyTorch LoRA 合并 + pointer head 参考在 1e-6 内
+一致；12 GB CUDA 卡上的 BF16 输出误差在 0.003 内。
