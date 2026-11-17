@@ -8,4 +8,4 @@ mod error;
 mod server;
 
 pub use config::{BatchConfig, ServerConfig};
-pub use server::{AppState, router, serve};
+pub use server::{AppState, router, router_with_resolver, serve, serve_with_resolver};

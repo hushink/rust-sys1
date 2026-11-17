@@ -9,13 +9,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use sys1_core::{
     Answers, DecisionModel, DecisionOutput, ModelError, ModelFactory, ModelFile, ModelManifest,
-    ModelRegistry, Prediction, Questions, RegistryConfig,
+    ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
 };
 use sys1_protocol::{
     Answer, ChoiceAnswer, ModelMetadataList, NoulAnswer, Question, ScoreAnswer, State,
     SystemOneResponse, Usage,
 };
-use sys1_server::{BatchConfig, ServerConfig, router};
+use sys1_server::{BatchConfig, ServerConfig, router, router_with_resolver};
 use tower::ServiceExt;
 
 struct FakeModel;
@@ -148,13 +148,61 @@ fn manifest(name: &str, aliases: &[&str]) -> ModelManifest {
 }
 
 fn app(config: ServerConfig) -> Router {
+    app_with_resolver(config, None)
+}
+
+fn app_with_resolver(config: ServerConfig, resolver: Option<Arc<dyn ModelResolver>>) -> Router {
     let registry = ModelRegistry::new(
         vec![manifest("laya-test", &["laya-latest"])],
         Arc::new(FakeFactory),
         RegistryConfig::default(),
     )
     .expect("registry");
-    router(Arc::new(registry), config)
+    router_with_resolver(Arc::new(registry), config, resolver)
+}
+
+struct FakeResolver;
+
+impl ModelResolver for FakeResolver {
+    fn resolve(&self, reference: &str) -> Result<Vec<ModelManifest>, ModelError> {
+        if reference == "test:dynamic" {
+            let mut manifest = manifest("dynamic-test", &["dynamic-alias"]);
+            manifest.files[0].url = "https://example.invalid/model.bin".to_owned();
+            Ok(vec![manifest])
+        } else {
+            Err(ModelError::load(format!("unknown reference: {reference}")))
+        }
+    }
+
+    fn release(&self, _name: &str) -> bool {
+        true
+    }
+}
+
+fn get(uri: &str) -> Request<Body> {
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .expect("request")
+}
+
+fn delete(uri: &str) -> Request<Body> {
+    Request::builder()
+        .method("DELETE")
+        .uri(uri)
+        .body(Body::empty())
+        .expect("request")
+}
+
+fn loaded_names(body: &Bytes) -> Vec<String> {
+    let value: serde_json::Value = serde_json::from_slice(body).expect("JSON");
+    value["loaded"]
+        .as_array()
+        .expect("loaded array")
+        .iter()
+        .map(|name| name.as_str().expect("name").to_owned())
+        .collect()
 }
 
 async fn send(app: Router, request: Request<Body>) -> (StatusCode, HeaderMap, Bytes) {
@@ -376,6 +424,341 @@ async fn concurrent_requests_are_batched() {
     assert!(
         batches.iter().any(|&size| size >= 4),
         "batches: {batches:?}"
+    );
+}
+
+#[tokio::test]
+async fn admin_api_is_disabled_by_default() {
+    let (status, _, _) = send(app(ServerConfig::default()), get("/api/models")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_api_uses_the_configured_api_key() {
+    let app = app(ServerConfig {
+        api_key: Some("secret".to_owned()),
+        enable_admin: true,
+        batching: None,
+        ..ServerConfig::default()
+    });
+
+    let (status, _, _) = send(app.clone(), get("/api/models")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/models")
+        .header(header::AUTHORIZATION, "Bearer secret")
+        .body(Body::empty())
+        .expect("request");
+    let (status, _, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+}
+
+#[tokio::test]
+async fn admin_load_unload_reload_manage_residency() {
+    let app = app(ServerConfig {
+        enable_admin: true,
+        batching: None,
+        ..ServerConfig::default()
+    });
+
+    let (status, _, body) = send(app.clone(), get("/api/models")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["models"][0]["name"], "laya-test");
+    assert_eq!(value["models"][0]["aliases"][0], "laya-latest");
+    assert_eq!(value["models"][0]["loaded"], false);
+    assert!(loaded_names(&body).is_empty());
+
+    // Loading an alias reports the canonical name.
+    let (status, _, body) = send(app.clone(), post("/api/models/laya-latest/load", "")).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["model"], "laya-test");
+    assert_eq!(value["loaded"], true);
+
+    let (_, _, body) = send(app.clone(), get("/api/models")).await;
+    assert_eq!(loaded_names(&body), vec!["laya-test".to_owned()]);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["models"][0]["loaded"], true);
+
+    let (status, _, body) = send(app.clone(), post("/api/models/laya-test/unload", "")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["was_loaded"], true);
+    assert!(loaded_names(&send(app.clone(), get("/api/models")).await.2).is_empty());
+
+    // Unload is idempotent.
+    let (status, _, body) = send(app.clone(), post("/api/models/laya-test/unload", "")).await;
+    assert_eq!(status, StatusCode::OK);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["was_loaded"], false);
+
+    let (status, _, body) = send(app.clone(), post("/api/models/laya-test/reload", "")).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["was_loaded"], false);
+    assert_eq!(
+        loaded_names(&send(app.clone(), get("/api/models")).await.2),
+        vec!["laya-test".to_owned()]
+    );
+
+    let (status, _, _) = send(app, post("/api/models/missing/load", "")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn admin_adds_and_removes_models_through_a_resolver() {
+    let resolver: Arc<dyn ModelResolver> = Arc::new(FakeResolver);
+    let app = app_with_resolver(
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        Some(resolver),
+    );
+
+    let (status, _, body) = send(
+        app.clone(),
+        post("/api/models", r#"{"reference":"test:dynamic"}"#),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["models"][0], "dynamic-test");
+
+    // The alias is usable immediately, and the model can be loaded on demand.
+    let (status, _, body) = send(app.clone(), post("/api/models/dynamic-alias/load", "")).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["model"], "dynamic-test");
+
+    let (_, _, body) = send(
+        app.clone(),
+        post(
+            "/v1/systemone",
+            serde_json::json!({
+                "model": "dynamic-test",
+                "state": "hello",
+                "questions": {
+                    "billing": { "type": "noul", "instructions": "Is this about billing?" }
+                }
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let response: SystemOneResponse = serde_json::from_slice(&body).expect("response JSON");
+    assert_eq!(response.model, "dynamic-test");
+
+    // A failed-resolution request is a client error and changes nothing.
+    let (status, _, body) = send(
+        app.clone(),
+        post("/api/models", r#"{"reference":"test:missing"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert!(
+        value["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("unknown")
+    );
+
+    // Adding the same reference twice conflicts and leaves the catalog intact.
+    let (status, _, _) = send(
+        app.clone(),
+        post("/api/models", r#"{"reference":"test:dynamic"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _, body) = send(app.clone(), delete("/api/models/dynamic-test")).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(value["removed"], true);
+
+    let (_, _, body) = send(app.clone(), get("/v1/models")).await;
+    let models: ModelMetadataList = serde_json::from_slice(&body).expect("models JSON");
+    assert!(
+        !models
+            .models
+            .iter()
+            .any(|model| model.name == "dynamic-test")
+    );
+    assert!(
+        !models
+            .models
+            .iter()
+            .any(|model| model.name == "dynamic-alias")
+    );
+
+    let (status, _, _) = send(app, delete("/api/models/dynamic-test")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+struct PartialResolver;
+
+impl ModelResolver for PartialResolver {
+    fn resolve(&self, _reference: &str) -> Result<Vec<ModelManifest>, ModelError> {
+        Ok(vec![manifest("new-one", &[]), manifest("laya-test", &[])])
+    }
+
+    fn release(&self, _name: &str) -> bool {
+        true
+    }
+}
+
+#[tokio::test]
+async fn admin_add_rolls_back_a_partial_registration() {
+    let resolver: Arc<dyn ModelResolver> = Arc::new(PartialResolver);
+    let app = app_with_resolver(
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        Some(resolver),
+    );
+
+    let (status, _, body) = send(
+        app.clone(),
+        post("/api/models", r#"{"reference":"test:partial"}"#),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let (_, _, body) = send(app.clone(), get("/v1/models")).await;
+    let models: ModelMetadataList = serde_json::from_slice(&body).expect("models JSON");
+    let names = models
+        .models
+        .into_iter()
+        .map(|model| model.name)
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["laya-test", "laya-latest"]);
+
+    let (status, _, _) = send(app.clone(), post("/api/models/new-one/load", "")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The pre-existing model is still servable.
+    let (status, _, body) = send(app, post("/v1/systemone", noul_body())).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_admin_adds_keep_one_entry() {
+    let resolver: Arc<dyn ModelResolver> = Arc::new(FakeResolver);
+    let app = app_with_resolver(
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        Some(resolver),
+    );
+
+    let (a, b) = tokio::join!(
+        send(
+            app.clone(),
+            post("/api/models", r#"{"reference":"test:dynamic"}"#)
+        ),
+        send(
+            app.clone(),
+            post("/api/models", r#"{"reference":"test:dynamic"}"#)
+        ),
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort();
+    assert_eq!(statuses, [StatusCode::CREATED, StatusCode::CONFLICT]);
+
+    let (_, _, body) = send(app, get("/v1/models")).await;
+    let models: ModelMetadataList = serde_json::from_slice(&body).expect("models JSON");
+    assert_eq!(
+        models
+            .models
+            .iter()
+            .filter(|model| model.name == "dynamic-test")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn admin_can_populate_an_empty_catalog() {
+    let registry = Arc::new(
+        ModelRegistry::new(Vec::new(), Arc::new(FakeFactory), RegistryConfig::default())
+            .expect("empty registry"),
+    );
+    let resolver: Arc<dyn ModelResolver> = Arc::new(FakeResolver);
+    let app = router_with_resolver(
+        registry,
+        ServerConfig {
+            enable_admin: true,
+            batching: None,
+            ..ServerConfig::default()
+        },
+        Some(resolver),
+    );
+
+    let (status, _, body) = send(app.clone(), get("/v1/models")).await;
+    assert_eq!(status, StatusCode::OK);
+    let models: ModelMetadataList = serde_json::from_slice(&body).expect("models JSON");
+    assert!(models.models.is_empty());
+
+    let (status, _, body) = send(
+        app.clone(),
+        post("/api/models", r#"{"reference":"test:dynamic"}"#),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let body = serde_json::json!({
+        "model": "dynamic-test",
+        "state": "hello",
+        "questions": {
+            "billing": { "type": "noul", "instructions": "Is this about billing?" }
+        }
+    })
+    .to_string();
+    let (status, _, body) = send(app, post("/v1/systemone", body)).await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let response: SystemOneResponse = serde_json::from_slice(&body).expect("response JSON");
+    assert_eq!(response.model, "dynamic-test");
+}
+
+#[tokio::test]
+async fn admin_add_requires_a_resolver() {
+    let app = app(ServerConfig {
+        enable_admin: true,
+        batching: None,
+        ..ServerConfig::default()
+    });
+    let (status, _, body) = send(app, post("/api/models", r#"{"reference":"test:dynamic"}"#)).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert!(
+        value["detail"]
+            .as_str()
+            .expect("detail")
+            .contains("not configured")
     );
 }
 

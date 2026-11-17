@@ -53,6 +53,25 @@ fn cli_cache_overrides_config() {
 }
 
 #[test]
+fn serve_without_models_requires_the_admin_api() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::write(
+        dir.path().join("sys1.toml"),
+        "[hub]\ncache_dir = \"models\"\n",
+    )
+    .expect("config");
+
+    let output = sys1()
+        .current_dir(dir.path())
+        .args(["serve", "--no-admin"])
+        .output()
+        .expect("run sys1 serve");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no models configured"), "{stderr}");
+}
+
+#[test]
 fn invalid_config_fails_with_a_path() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("bad.toml");

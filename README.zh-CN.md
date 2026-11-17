@@ -16,6 +16,7 @@
 - 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁。
 - 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理。
+- 运行时模型管理：无需重启即可加载、卸载、重载、添加和移除模型。
 - 加速器 feature 骨架：CPU / CUDA / cuDNN / Metal / Accelerate。
 
 ## Workspace
@@ -79,6 +80,34 @@ sys1 serve --bind 0.0.0.0:8080 --api-key secret \
 关闭，或调大 `--batch-max`（例如 64）以提升 GPU 高并发吞吐。CUDA 上
 `--dtype f16` 是最高吞吐模式；`--tf32` 是可选的 F32 加速。CUDA 上 state ≥512
 token 默认启用精确 local-window attention；`--no-local-window` 退回 eager。
+
+### 运行时模型管理
+
+CLI 在 `/v1` 之外暴露运维 API。默认开启，与 `/v1/*` 使用同一个 Bearer key；
+可用 `--no-admin` 或 `[server] admin = false` 关闭。
+
+| 方法 | 路径 | 含义 |
+|---|---|---|
+| `GET` | `/api/models` | 模型目录、别名、常驻状态与 LRU 限制 |
+| `POST` | `/api/models/{name}/load` | 立即加载到内存 |
+| `POST` | `/api/models/{name}/unload` | 释放常驻实例（幂等） |
+| `POST` | `/api/models/{name}/reload` | 卸载后重新加载 |
+| `POST` | `/api/models` | 解析 `ModelRef` 并加入运行时目录 |
+| `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
+
+```bash
+curl http://127.0.0.1:8080/api/models
+curl -X POST http://127.0.0.1:8080/api/models/laya-latest/load
+curl -X POST http://127.0.0.1:8080/api/models \
+  -H 'Content-Type: application/json' \
+  -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
+curl -X POST http://127.0.0.1:8080/api/models/laya-multilingual/unload
+curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+```
+
+`POST /api/models` 接受与 `sys1 pull` 相同的引用，也接受 `sys1.toml` 中
+`[models]` 的名称。运行时添加/移除的条目不会持久化：重启后以配置中的
+`[models]` 为准。已经持有模型句柄的请求会正常完成，后续请求会重新触发懒加载。
 
 ### 配置
 

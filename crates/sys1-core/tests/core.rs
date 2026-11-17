@@ -238,6 +238,34 @@ fn list_models_includes_alias() {
 }
 
 #[test]
+fn runtime_registration_and_removal() {
+    let (registry, factory) = registry(vec![manifest("a", &["alias-a"])], 3);
+    registry
+        .register(manifest("b", &["alias-b"]))
+        .expect("register b");
+    assert_eq!(registry.resolve("alias-b").expect("resolve alias").0, "b");
+    assert_eq!(registry.manifests().len(), 2);
+
+    let _ = registry.acquire("b").expect("load b");
+    assert!(registry.is_loaded("alias-b"));
+
+    assert_eq!(
+        registry.register(manifest("b", &[])).unwrap_err(),
+        ManifestError::DuplicateName("b".to_owned())
+    );
+    assert_eq!(
+        registry.register(manifest("c", &["a"])).unwrap_err(),
+        ManifestError::AliasConflict("a".to_owned())
+    );
+
+    assert!(registry.unregister("alias-b"));
+    assert!(registry.resolve("b").is_none());
+    assert!(!registry.is_loaded("b"));
+    assert!(!registry.unregister("b"));
+    assert_eq!(factory.loads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn manifest_rejects_path_traversal() {
     let mut manifest = manifest("a", &[]);
     manifest.files[0].path = "../model.bin".to_owned();

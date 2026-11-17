@@ -46,6 +46,24 @@ pub trait ModelFactory: Send + Sync {
     fn load(&self, manifest: &ModelManifest) -> Result<Arc<dyn DecisionModel>, ModelError>;
 }
 
+/// Resolves a user-supplied model reference at runtime.
+///
+/// The reference is implementation-defined: a hub id (`hf:org/repo`), a local
+/// directory, or an HTTP manifest URL. `resolve` must materialize whatever it
+/// needs and register the model with the factory the registry uses, because
+/// the returned manifests are loaded through that factory. It must not load
+/// the weights itself.
+pub trait ModelResolver: Send + Sync {
+    fn resolve(&self, reference: &str) -> Result<Vec<ModelManifest>, ModelError>;
+
+    /// Forget resolver-side state (downloads, directory registrations) for a
+    /// model that was removed from the catalog.
+    fn release(&self, name: &str) -> bool {
+        let _ = name;
+        false
+    }
+}
+
 /// Typed answers plus token usage. The registry wraps this into the official
 /// response shape and fills the canonical model name.
 #[derive(Clone, Debug, PartialEq)]

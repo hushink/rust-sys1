@@ -71,6 +71,12 @@ v1 的 Router 是启发式；完整官方 routing golden 对齐待补。
 `LayaRouter::predict_batch` 会按选中的 checkpoint 分组，因此 `laya-latest`
 也能受益于服务端 batching，而不会把不同 checkpoint 混进同一批。
 
+## Factory
+
+`LayaFactory` 为 `ModelRegistry` 维护「模型名 → checkpoint 目录或 router 根目录」
+的映射。`register` / `register_router` 接收 `&self`，因此服务运行期间也能添加模型；
+`unregister` 删除映射。重复注册同名项时保留第一次的注册，替换前需先 `unregister`。
+
 ## 数值对齐
 
 Golden 测试对比官方 Laya vectors 的 `input_ids`、`markers`、logits 与答案。

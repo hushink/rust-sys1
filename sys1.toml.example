@@ -29,6 +29,7 @@ cache_dir = "D:/models/sys1-cache"
 # batch = true                 # false disables cross-request batching
 # tf32 = false                 # F32 CUDA GEMMs
 # local_window = true          # exact local-window attention (CUDA, >=512 tokens)
+# admin = true                 # /api/models load/unload/register endpoints
 
 # Serving model catalog. Keys are the names clients pass to /v1/systemone.
 # Values are ModelRefs: local:/path, hf:owner/repo, modelscope:..., or a

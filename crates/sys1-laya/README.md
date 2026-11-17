@@ -71,6 +71,13 @@ The router is heuristic in v1; full official routing golden parity is pending.
 `LayaRouter::predict_batch` groups requests by selected checkpoint, so
 `laya-latest` also benefits from server batching without mixing checkpoints.
 
+## Factory
+
+`LayaFactory` maps model names to checkpoint directories or router roots for
+`ModelRegistry`. `register` / `register_router` take `&self`, so a running
+server can add models; `unregister` drops a mapping. Registering an existing
+name keeps the first registration — unregister first to replace it.
+
 ## Parity
 
 Golden tests compare `input_ids`, `markers`, logits, and answers against the

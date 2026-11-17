@@ -34,7 +34,7 @@ sys1-hub        ModelSource / ModelCache：Local、HF、ModelScope、HTTP
       ▲
 sys1-laya       Laya family 的 candle 实现（clean-room）
       ▲
-sys1-server     axum：严格官方 /v1/*、/health、跨请求 batching、错误映射
+sys1-server     axum：严格官方 /v1/*、/health、运行时 /api/*、跨请求 batching、错误映射
       ▲
 sys1-cli        clap 二进制：serve/pull/list/show/rm/run/doctor
       ▲
@@ -76,6 +76,7 @@ let tone = answers.choice("tone")?;   // 类型化读取
 - Bearer 可选：配置了 key 就强制校验；未配置则接受任意/无 key；非 loopback 绑定且未配置 key 时告警。
 - 未知模型返回 400 `{detail: ...}`。
 - `/v1/*` 不输出 Laya 私有字段；扩展字段放到 `/api/*` 或响应头（后续）。
+- 运行时模型管理：`/api/models` 提供目录/常驻状态、`load`/`unload`/`reload`、按引用添加与删除；与 `/v1/*` 共用 Bearer，库内默认关闭（`ServerConfig::enable_admin`），`sys1 serve` 默认开启并可用 `--no-admin` 关闭。运行时增删不持久化，重启后以配置 manifest 为准。细节见 ADR 0008。
 - 超长 state 的 v1 行为待确认：建议返回 400，detail 含 `max_tokens_exceeded`（不做静默截断）。
 - 跨请求 batching：并发请求经 mpsc 聚合，按模型分组后调用 `predict_batch`；默认 `max_batch=32`、`max_wait=2 ms`，GPU 单请求只付 500 µs yield grace。模型可用 `supports_cross_request_batching` 退出；CPU 上的 Laya 退出，因为独立 CPU 前向已经使用线程池。进程内接口不自动批处理，调用方可直接使用 `predict_batch`。细节见 ADR 0006。
 - GPU 精度档位：默认 F32；`--dtype f16` 在 Ampere+ 上提高高并发吞吐，抽查概率差异 ~5e-4；`--tf32` 为 F32 GEMM 启用 TF32，收益在波动范围内。
@@ -151,6 +152,7 @@ let tone = answers.choice("tone")?;   // 类型化读取
 - 配置优先级：CLI > `SYS1_*` 环境变量 > `sys1.toml` > 默认。
 - 默认绑定 `127.0.0.1:8080`；缓存目录用平台默认，`SYS1_CACHE` 覆盖。
 - `--api-key` / `SYS1_API_KEY` 可选；日志用 `tracing` + `RUST_LOG`。
+- `/api/models` 管理 API 默认开启；`--no-admin` 或 `[server] admin = false` 关闭；未设置 API key 时启动日志告警。
 - 二进制名暂定 `sys1`。
 
 ## 9. 验收
@@ -172,8 +174,9 @@ let tone = answers.choice("tone")?;   // 类型化读取
 
 - 已完成：`sys1-protocol`、`sys1-core`、`sys1-hub`、`sys1-laya`、`sys1-server`、`sys1-cli`、`sys1`。
 - 已用本地缓存权重验证：`sys1 run`、`sys1 serve` 的 `/v1/models`、`/v1/systemone`、`/health`、gzip 请求；`laya-latest` 选中 English 并成功加载。
+- 已用本地缓存权重验证运行时管理：`/api/models` 列表、load/unload/reload、按 `local:` 引用动态添加、推理、删除；CPU F32 multilingual 冷加载约 12 s。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
-- 待补：zstd、`sys1.toml`、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。
+- 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。
 
 ## 11. 已确认与遗留
 
@@ -187,7 +190,7 @@ let tone = answers.choice("tone")?;   // 类型化读取
 
 1. Laya 权重许可证：再分发前确认；v1 不内置权重。
 2. Laya 原生 confidence 的 HTTP 暴露方式：独立 `/api/*` 端点或响应头（v1.1）。
-3. zstd 请求压缩、`sys1.toml`、ONNX/ORT/TensorRT、long/act/abstention/parallel、完整 Router golden 对齐。
+3. zstd 请求压缩、ONNX/ORT/TensorRT、long/act/abstention/parallel、完整 Router golden 对齐。
 
 ## 12. 决策索引
 
@@ -224,3 +227,4 @@ let tone = answers.choice("tone")?;   // 类型化读取
 | Q28 | CPU 三平台 CI；CUDA/Metal 编译检查；GPU self-hosted 可选 |
 | Q29 | manifest 预留 `backend`/`format` |
 | Q31 | TensorRT 走 v1.1 ORT TensorRT EP，不做 candle 原生 TensorRT |
+| Q34 | 运行时模型管理：可变目录 + 可选 resolver + `/api/models` 管理端点；不持久化，配置为准 |

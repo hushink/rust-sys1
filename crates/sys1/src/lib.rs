@@ -36,7 +36,7 @@ pub mod laya {
 
 pub use sys1_core::{
     AnswerError, Answers, DecisionModel, DecisionOutput, ModelError, ModelFactory, ModelManifest,
-    ModelRegistry, Prediction, Questions, RegistryConfig,
+    ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
 };
 pub use sys1_protocol::{
     Answer, ChoiceAnswer, Content, ModelMetadata, ModelMetadataList, NoulAnswer, Question,

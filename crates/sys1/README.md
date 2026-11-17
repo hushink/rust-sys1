@@ -38,8 +38,9 @@ let billing = output.answers.noul("billing")?;
 - `sys1::protocol` — all of `sys1-protocol`
 - `sys1::hub` — all of `sys1-hub` (feature `hub`)
 - `sys1::laya` — all of `sys1-laya` (feature `laya`)
-- Flat aliases: `DecisionModel`, `ModelRegistry`, `Questions`, `Answers`, `State`,
-  `Question`, `Answer`, `LayaModel`, `LayaOptions`, `LayaFactory`, `Hub`, `HubConfig`.
+- Flat aliases: `DecisionModel`, `ModelResolver`, `ModelRegistry`, `Questions`,
+  `Answers`, `State`, `Question`, `Answer`, `LayaModel`, `LayaOptions`,
+  `LayaFactory`, `Hub`, `HubConfig`.
 
 ## Test
 

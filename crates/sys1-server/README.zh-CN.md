@@ -11,6 +11,12 @@
 | `POST` | `/v1/systemone` | 官方决策端点 |
 | `GET` | `/v1/models` | 官方模型/别名列表 |
 | `GET` | `/health` | 运维健康检查，位于 `/v1` 之外 |
+| `GET` | `/api/models` | 运行时目录、别名与常驻状态（admin） |
+| `POST` | `/api/models/{name}/load` | 加载到内存 |
+| `POST` | `/api/models/{name}/unload` | 释放常驻实例 |
+| `POST` | `/api/models/{name}/reload` | 卸载后重新加载 |
+| `POST` | `/api/models` | 从引用添加模型（需要 resolver） |
+| `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
 
 有意不实现 `/v1/decisions`。
 
@@ -33,6 +39,37 @@ let app = router(registry.clone(), ServerConfig::default());
 // 或独立运行：
 serve("127.0.0.1:8080".parse()?, registry, ServerConfig::default()).await?;
 ```
+
+`/api/*` 默认关闭，只有 `ServerConfig::enable_admin = true` 时才注册；CLI 默认开启。
+需要 `POST /api/models` 时，用 resolver 构建 router：
+
+```rust
+use sys1_core::ModelResolver;
+use sys1_server::router_with_resolver;
+
+let resolver: Arc<dyn ModelResolver> = Arc::new(my_resolver);
+let app = router_with_resolver(
+    registry.clone(),
+    ServerConfig { enable_admin: true, ..ServerConfig::default() },
+    Some(resolver),
+);
+```
+
+## 运行时模型管理
+
+- `ModelRegistry::is_loaded` 查询常驻状态；`register` / `unregister` 修改运行时
+  目录并丢弃常驻实例。
+- `POST /api/models` 接收 `{"reference": "hf:owner/repo"}`，通过
+  `ModelResolver` 解析并注册返回的所有 manifest。若名称已存在则返回 `409`，
+  原有目录保持不变。
+- `DELETE /api/models/{name}` 还会调用 `ModelResolver::release`，让 resolver
+  清理本地目录映射。
+- 未配置 resolver 时，`POST /api/models` 返回 `501`；已配置模型的
+  load/unload/reload 和 DELETE 仍可用。
+- admin 请求与 `/v1/*` 使用同一个 Bearer key。未配置 key 时 admin API 是开放的，
+  请保持绑定地址私密。
+- 运行时添加/移除不会持久化；重启后以传给 `ModelRegistry::new` 的 manifest 为准。
+- unload 是幂等的（`was_loaded` 返回之前的状态）。已经持有模型句柄的请求会正常完成。
 
 ## 行为
 

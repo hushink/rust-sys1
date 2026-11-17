@@ -1,7 +1,7 @@
 use crate::{Error, ManifestError, ModelFactory, ModelManifest, Questions};
 use indexmap::IndexMap;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use sys1_protocol::{ModelMetadata, State, SystemOneResponse};
 
@@ -34,12 +34,62 @@ impl RegistryConfig {
 }
 
 /// A runtime catalog of manifests plus a lazily-loaded model cache.
+///
+/// The catalog starts from the manifests passed to [`ModelRegistry::new`] and
+/// can be extended or trimmed at runtime with [`ModelRegistry::register`] and
+/// [`ModelRegistry::unregister`]. The configured manifests are authoritative:
+/// they return on the next start.
 pub struct ModelRegistry {
-    manifests: IndexMap<String, ModelManifest>,
-    aliases: HashMap<String, String>,
+    catalog: RwLock<Catalog>,
     factory: Arc<dyn ModelFactory>,
     config: RegistryConfig,
     state: Mutex<RegistryState>,
+}
+
+struct Catalog {
+    manifests: IndexMap<String, ModelManifest>,
+    aliases: HashMap<String, String>,
+}
+
+impl Catalog {
+    fn resolve(&self, name: &str) -> Option<(String, ModelManifest)> {
+        if let Some(manifest) = self.manifests.get(name) {
+            return Some((manifest.name.clone(), manifest.clone()));
+        }
+        let canonical = self.aliases.get(name)?;
+        let manifest = self.manifests.get(canonical)?;
+        Some((manifest.name.clone(), manifest.clone()))
+    }
+
+    fn insert(&mut self, manifest: ModelManifest) -> Result<(), ManifestError> {
+        manifest.validate()?;
+        if self.manifests.contains_key(&manifest.name) {
+            return Err(ManifestError::DuplicateName(manifest.name));
+        }
+        if self.aliases.contains_key(&manifest.name) {
+            return Err(ManifestError::AliasConflict(manifest.name));
+        }
+        for alias in &manifest.aliases {
+            if self.manifests.contains_key(alias) {
+                return Err(ManifestError::AliasConflict(alias.clone()));
+            }
+            if self.aliases.contains_key(alias) {
+                return Err(ManifestError::DuplicateAlias(alias.clone()));
+            }
+        }
+        for alias in &manifest.aliases {
+            self.aliases.insert(alias.clone(), manifest.name.clone());
+        }
+        self.manifests.insert(manifest.name.clone(), manifest);
+        Ok(())
+    }
+
+    fn remove(&mut self, name: &str) -> Option<String> {
+        let (canonical, _) = self.resolve(name)?;
+        self.manifests.shift_remove(&canonical);
+        self.aliases.retain(|_, target| target != &canonical);
+        Some(canonical)
+    }
 }
 
 #[derive(Default)]
@@ -81,32 +131,16 @@ impl ModelRegistry {
         factory: Arc<dyn ModelFactory>,
         config: RegistryConfig,
     ) -> Result<Self, ManifestError> {
-        let mut by_name = IndexMap::new();
-        let mut aliases = HashMap::new();
-
+        let mut catalog = Catalog {
+            manifests: IndexMap::new(),
+            aliases: HashMap::new(),
+        };
         for manifest in manifests {
-            manifest.validate()?;
-            if by_name.contains_key(&manifest.name) {
-                return Err(ManifestError::DuplicateName(manifest.name));
-            }
-            for alias in &manifest.aliases {
-                if aliases.contains_key(alias) {
-                    return Err(ManifestError::DuplicateAlias(alias.clone()));
-                }
-                aliases.insert(alias.clone(), manifest.name.clone());
-            }
-            by_name.insert(manifest.name.clone(), manifest);
-        }
-
-        for alias in aliases.keys() {
-            if by_name.contains_key(alias) {
-                return Err(ManifestError::AliasConflict(alias.clone()));
-            }
+            catalog.insert(manifest)?;
         }
 
         Ok(Self {
-            manifests: by_name,
-            aliases,
+            catalog: RwLock::new(catalog),
             factory,
             config,
             state: Mutex::new(RegistryState::default()),
@@ -117,14 +151,37 @@ impl ModelRegistry {
         self.config
     }
 
-    pub fn manifests(&self) -> &IndexMap<String, ModelManifest> {
-        &self.manifests
+    /// Canonical manifests in catalog order.
+    pub fn manifests(&self) -> Vec<ModelManifest> {
+        self.lock_catalog().manifests.values().cloned().collect()
+    }
+
+    /// Add a model to the runtime catalog. The registry factory must be able
+    /// to load it; see [`crate::ModelResolver`].
+    pub fn register(&self, manifest: ModelManifest) -> Result<(), ManifestError> {
+        self.lock_catalog_mut().insert(manifest)
+    }
+
+    /// Remove a model (or alias) from the runtime catalog and drop its resident
+    /// instance. Returns whether the catalog contained the model.
+    ///
+    /// Configured manifests come back on the next start; dynamically added
+    /// manifests are gone unless they are added again.
+    pub fn unregister(&self, name: &str) -> bool {
+        let removed = self.lock_catalog_mut().remove(name);
+        let Some(canonical) = removed else {
+            return false;
+        };
+        let mut state = self.lock_state();
+        state.entries.shift_remove(&canonical);
+        true
     }
 
     /// Names and aliases exposed by `GET /v1/models`.
     pub fn list_models(&self) -> Vec<ModelMetadata> {
+        let catalog = self.lock_catalog();
         let mut models = Vec::new();
-        for manifest in self.manifests.values() {
+        for manifest in catalog.manifests.values() {
             models.push(manifest.metadata());
             for alias in &manifest.aliases {
                 models.push(ModelMetadata::new(
@@ -138,13 +195,8 @@ impl ModelRegistry {
     }
 
     /// Resolve a model name or alias to its canonical manifest.
-    pub fn resolve(&self, name: &str) -> Option<(&str, &ModelManifest)> {
-        if let Some(manifest) = self.manifests.get(name) {
-            return Some((manifest.name.as_str(), manifest));
-        }
-        let canonical = self.aliases.get(name)?;
-        let manifest = self.manifests.get(canonical)?;
-        Some((manifest.name.as_str(), manifest))
+    pub fn resolve(&self, name: &str) -> Option<(String, ModelManifest)> {
+        self.lock_catalog().resolve(name)
     }
 
     /// Return a loaded model without triggering a load.
@@ -152,11 +204,24 @@ impl ModelRegistry {
         let (canonical, _) = self.resolve(name)?;
         let entry = {
             let state = self.lock_state();
-            state.entries.get(canonical)?.clone()
+            state.entries.get(&canonical)?.clone()
         };
         let model = entry.cell.get()?.clone();
         entry.touch();
-        Some((canonical.to_owned(), model))
+        Some((canonical, model))
+    }
+
+    /// Return whether a model is currently resident, without touching its LRU
+    /// timestamp.
+    pub fn is_loaded(&self, name: &str) -> bool {
+        let Some((canonical, _)) = self.resolve(name) else {
+            return false;
+        };
+        let state = self.lock_state();
+        state
+            .entries
+            .get(&canonical)
+            .is_some_and(|entry| entry.cell.get().is_some())
     }
 
     /// Load a model if needed and return a shared handle.
@@ -164,8 +229,6 @@ impl ModelRegistry {
         let (canonical, manifest) = self.resolve(name).ok_or_else(|| Error::ModelNotFound {
             model: name.to_owned(),
         })?;
-        let canonical = canonical.to_owned();
-        let manifest = manifest.clone();
 
         let entry = {
             let mut state = self.lock_state();
@@ -216,7 +279,6 @@ impl ModelRegistry {
         let (canonical, _) = self.resolve(name).ok_or_else(|| Error::ModelNotFound {
             model: name.to_owned(),
         })?;
-        let canonical = canonical.to_owned();
         let model = self.acquire(&canonical)?;
         let output = model
             .predict(state, questions)
@@ -237,7 +299,6 @@ impl ModelRegistry {
         let Some((canonical, _)) = self.resolve(name) else {
             return false;
         };
-        let canonical = canonical.to_owned();
         let mut state = self.lock_state();
         state.entries.shift_remove(&canonical).is_some()
     }
@@ -303,6 +364,18 @@ impl ModelRegistry {
                 None => break,
             }
         }
+    }
+
+    fn lock_catalog(&self) -> std::sync::RwLockReadGuard<'_, Catalog> {
+        self.catalog
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn lock_catalog_mut(&self) -> std::sync::RwLockWriteGuard<'_, Catalog> {
+        self.catalog
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, RegistryState> {

@@ -50,6 +50,21 @@ impl ApiError {
             ErrorResponse::bad_request(message),
         )
     }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, ErrorResponse::bad_request(message))
+    }
+
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, ErrorResponse::bad_request(message))
+    }
+
+    pub fn not_implemented(message: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::NOT_IMPLEMENTED,
+            ErrorResponse::bad_request(message),
+        )
+    }
 }
 
 pub(crate) fn map_registry_error(error: RegistryError) -> ApiError {
@@ -62,7 +77,7 @@ pub(crate) fn map_registry_error(error: RegistryError) -> ApiError {
     }
 }
 
-fn map_model_error(error: ModelError) -> ApiError {
+pub(crate) fn map_model_error(error: ModelError) -> ApiError {
     match error {
         ModelError::InvalidRequest { message } => {
             if message.starts_with("max_tokens_exceeded") {

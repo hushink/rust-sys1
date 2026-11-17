@@ -53,6 +53,8 @@ pub struct ServerSection {
     pub tf32: Option<bool>,
     /// `false` uses eager attention for local layers.
     pub local_window: Option<bool>,
+    /// `false` disables the `/api/models` management endpoints (default true).
+    pub admin: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default)]

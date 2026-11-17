@@ -1,10 +1,12 @@
 mod config;
+mod source;
 
 use anyhow::{Context, bail};
 use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
 use config::LoadedConfig;
 use indexmap::IndexMap;
+use source::{LayaResolver, register_pulled};
 use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
@@ -13,15 +15,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use sys1_core::{
-    DecisionModel, DevicePreference, ModelFile, ModelManifest, ModelRegistry, Questions,
-    RegistryConfig,
+    DecisionModel, DevicePreference, ModelFile, ModelManifest, ModelRegistry, ModelResolver,
+    Questions, RegistryConfig,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
     ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory, LayaModel, LayaOptions, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
-use sys1_server::{BatchConfig, ServerConfig, serve};
+use sys1_server::{BatchConfig, ServerConfig, serve_with_resolver};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -99,6 +101,9 @@ struct ServeArgs {
     /// Disable exact sliding-window attention for local layers.
     #[arg(long)]
     no_local_window: bool,
+    /// Disable the `/api/models` management endpoints.
+    #[arg(long)]
+    no_admin: bool,
 }
 
 #[derive(clap::Args)]
@@ -252,15 +257,32 @@ fn serve_command(
     } else {
         args.models
     };
-    let registry = {
-        let hub = make_hub(cache, offline, config)?;
-        let (manifests, factory) = build_models(&hub, &specs, options)?;
-        Arc::new(ModelRegistry::new(
-            manifests,
-            Arc::new(factory),
-            RegistryConfig::default(),
-        )?)
-    };
+    let enable_admin = !args.no_admin && server.admin.unwrap_or(true);
+    let hub = make_hub(cache, offline, config)?;
+    let (manifests, factory) = build_models(&hub, &specs, options.clone())?;
+    if manifests.is_empty() {
+        if !enable_admin {
+            bail!(
+                "no models configured; pass --model NAME=REF, add [models] to sys1.toml, \
+                 or leave the admin API enabled to add models at runtime"
+            );
+        }
+        tracing::warn!(
+            "starting with an empty catalog; add models with `POST /api/models` or `sys1 pull`"
+        );
+    }
+    let resolver: Arc<dyn ModelResolver> = Arc::new(LayaResolver::new(
+        hub,
+        factory.clone(),
+        options,
+        config.value.models.clone(),
+    ));
+    let registry = Arc::new(ModelRegistry::new(
+        manifests,
+        factory,
+        RegistryConfig::default(),
+    )?);
+
     let batch_max = args.batch_max.or(server.batch_max).unwrap_or(32);
     let batch_wait_ms = args.batch_wait_ms.or(server.batch_wait_ms).unwrap_or(2);
     let batching = if args.no_batch || server.batch == Some(false) {
@@ -271,15 +293,27 @@ fn serve_command(
             max_wait: Duration::from_millis(batch_wait_ms),
         })
     };
+    let api_key = args.api_key.or_else(|| server.api_key.clone());
+    if enable_admin && api_key.is_none() {
+        tracing::warn!(
+            "the model management API is enabled without an API key; keep the bind address private"
+        );
+    }
     let server_config = ServerConfig {
-        api_key: args.api_key.or_else(|| server.api_key.clone()),
+        api_key,
         batching,
+        enable_admin,
         ..ServerConfig::default()
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(serve(bind, registry, server_config))?;
+    runtime.block_on(serve_with_resolver(
+        bind,
+        registry,
+        server_config,
+        Some(resolver),
+    ))?;
     Ok(())
 }
 
@@ -516,8 +550,8 @@ fn build_models(
     hub: &Hub,
     specs: &[String],
     options: LayaOptions,
-) -> anyhow::Result<(Vec<ModelManifest>, LayaFactory)> {
-    let mut factory = LayaFactory::new();
+) -> anyhow::Result<(Vec<ModelManifest>, Arc<LayaFactory>)> {
+    let factory = Arc::new(LayaFactory::new());
     let mut manifests = Vec::new();
     let mut seen = HashSet::new();
 
@@ -526,52 +560,37 @@ fn build_models(
             if !is_laya_model(&pulled.manifest) {
                 continue;
             }
-            factory.register(&pulled.manifest.name, &pulled.directory, options.clone());
-            push_manifest(&mut manifests, &mut seen, pulled.manifest);
-        }
-        if manifests.is_empty() {
-            bail!("no cached Laya models; run `sys1 pull <reference>` or pass --model NAME=REF");
+            register_pulled(
+                &factory,
+                &pulled,
+                options.clone(),
+                None,
+                &mut manifests,
+                &mut seen,
+            );
         }
         return Ok((manifests, factory));
     }
 
     for spec in specs {
         let (name, reference) = parse_model_spec(spec)?;
-        let mut pulled = pull_model(hub, &reference)?;
+        let pulled = pull_model(hub, &reference)?;
         if !is_laya_model(&pulled.manifest) {
             bail!("{reference} does not look like a Laya safetensors checkpoint");
         }
-        pulled.manifest.family = "laya".to_owned();
-        pulled.manifest.backend = "candle".to_owned();
-        pulled.manifest.format = "safetensors".to_owned();
-
-        if name == "laya-latest" && has_laya_variants(&pulled.directory) {
-            factory.register_router("laya-latest", &pulled.directory, options.clone());
-            for (variant_name, directory) in variant_directories(&pulled.directory) {
-                if !is_laya_directory(&directory) {
-                    continue;
-                }
-                factory.register(variant_name, &directory, options.clone());
-                let mut variant = pulled.manifest.clone();
-                variant.name = variant_name.to_owned();
-                variant.aliases.clear();
-                variant.description = format!("{} ({variant_name})", pulled.manifest.description);
-                push_manifest(&mut manifests, &mut seen, variant);
-            }
-            pulled.manifest.name = "laya-latest".to_owned();
-            pulled.manifest.aliases.clear();
-            push_manifest(&mut manifests, &mut seen, pulled.manifest);
-        } else {
-            if name == "laya-latest" {
-                tracing::warn!(
-                    "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
-                );
-            }
-            pulled.manifest.name = name.clone();
-            pulled.manifest.aliases.clear();
-            factory.register(&name, &pulled.directory, options.clone());
-            push_manifest(&mut manifests, &mut seen, pulled.manifest);
+        if name == "laya-latest" && !has_laya_variants(&pulled.directory) {
+            tracing::warn!(
+                "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
+            );
         }
+        register_pulled(
+            &factory,
+            &pulled,
+            options.clone(),
+            Some(&name),
+            &mut manifests,
+            &mut seen,
+        );
     }
     Ok((manifests, factory))
 }

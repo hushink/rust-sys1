@@ -16,6 +16,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock.
 - Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference.
+- Runtime model management: load, unload, reload, and add/remove models without restarting.
 - Accelerator feature skeleton: CPU / CUDA / cuDNN / Metal / Accelerate.
 
 ## Workspace
@@ -81,6 +82,37 @@ Cross-request batching is enabled by default (`--batch-max 32
 `--dtype f16` is the fastest high-throughput mode; `--tf32` is an optional
 lower-risk F32 speedup. Exact local-window attention is on by default for CUDA
 states of at least 512 tokens; use `--no-local-window` for the eager baseline.
+
+### Runtime model management
+
+The CLI exposes an operational API outside `/v1`. It is enabled by default and
+authenticates with the same Bearer key as `/v1/*`; disable it with `--no-admin`
+or `[server] admin = false`.
+
+| Method | Path | Meaning |
+|---|---|---|
+| `GET` | `/api/models` | Catalog, aliases, residency, and LRU limits |
+| `POST` | `/api/models/{name}/load` | Load a model into memory now |
+| `POST` | `/api/models/{name}/unload` | Drop the resident instance (idempotent) |
+| `POST` | `/api/models/{name}/reload` | Unload and load again |
+| `POST` | `/api/models` | Resolve a `ModelRef` and add it to the live catalog |
+| `DELETE` | `/api/models/{name}` | Unload and remove it from the live catalog |
+
+```bash
+curl http://127.0.0.1:8080/api/models
+curl -X POST http://127.0.0.1:8080/api/models/laya-latest/load
+curl -X POST http://127.0.0.1:8080/api/models \
+  -H 'Content-Type: application/json' \
+  -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
+curl -X POST http://127.0.0.1:8080/api/models/laya-multilingual/unload
+curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+```
+
+`POST /api/models` accepts the same references as `sys1 pull`, plus `[models]`
+names from `sys1.toml`. Added and removed entries are runtime-only: the
+configured `[models]` catalog is authoritative after a restart. In-flight
+requests that already hold a model handle finish normally; later requests
+trigger a lazy load again.
 
 ### Configuration
 

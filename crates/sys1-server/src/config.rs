@@ -27,6 +27,9 @@ pub struct ServerConfig {
     pub max_body_bytes: usize,
     /// Cross-request batching. `None` disables it.
     pub batching: Option<BatchConfig>,
+    /// Expose the `/api/models` management endpoints. Disabled by default for
+    /// embedded servers; they authenticate with the same API key as `/v1/*`.
+    pub enable_admin: bool,
 }
 
 impl Default for ServerConfig {
@@ -35,6 +38,7 @@ impl Default for ServerConfig {
             api_key: None,
             max_body_bytes: 32 * 1024 * 1024,
             batching: Some(BatchConfig::default()),
+            enable_admin: false,
         }
     }
 }

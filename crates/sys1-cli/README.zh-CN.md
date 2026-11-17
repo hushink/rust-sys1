@@ -54,9 +54,38 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --batch-wait-ms 2          # 收集 batch 的等待窗口
 --max-attention-elements 67108864  # 按 attention 显存切分长 batch
 --no-batch                 # 关闭跨请求 batching
+--no-admin                 # 关闭 /api/models 管理端点
 --offline
 --cache <dir>              # 或 SYS1_CACHE
 ```
+
+## 模型管理 API
+
+`sys1 serve` 在 `/v1` 之外提供运维 API，用于控制常驻状态和运行时目录。默认开启，
+与 `/v1/*` 使用同一个 Bearer key；可用 `--no-admin` 或 `[server] admin = false`
+关闭。
+
+| 方法 | 路径 | 含义 |
+|---|---|---|
+| `GET` | `/api/models` | 目录、别名、常驻状态、LRU 限制 |
+| `POST` | `/api/models/{name}/load` | 立即加载到内存 |
+| `POST` | `/api/models/{name}/unload` | 释放常驻实例（幂等） |
+| `POST` | `/api/models/{name}/reload` | 卸载后重新加载 |
+| `POST` | `/api/models` | 解析引用并加入运行时目录 |
+| `DELETE` | `/api/models/{name}` | 卸载并从运行时目录移除 |
+
+```bash
+curl http://127.0.0.1:8080/api/models
+curl -X POST http://127.0.0.1:8080/api/models/laya-latest/load
+curl -X POST http://127.0.0.1:8080/api/models \
+  -H 'Content-Type: application/json' \
+  -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
+curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+```
+
+添加引用时会通过 hub 物化模型（已缓存则直接使用），并立即对
+`/v1/systemone` 可见。运行时添加/移除不会持久化；重启后以 `sys1.toml`
+中的 `[models]` 为准。已经持有模型句柄的请求会正常完成。
 
 ## 配置
 

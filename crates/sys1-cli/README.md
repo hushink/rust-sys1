@@ -54,9 +54,39 @@ Useful flags:
 --batch-wait-ms 2          # batch collection window
 --max-attention-elements 67108864  # chunk long batches by attention memory
 --no-batch                 # disable cross-request batching
+--no-admin                 # disable /api/models management endpoints
 --offline
 --cache <dir>              # or SYS1_CACHE
 ```
+
+## Model management API
+
+`sys1 serve` exposes an operational API outside `/v1` for residency and live
+catalog changes. It is enabled by default and uses the same Bearer key as
+`/v1/*`; disable it with `--no-admin` or `[server] admin = false`.
+
+| Method | Path | Meaning |
+|---|---|---|
+| `GET` | `/api/models` | Catalog, aliases, residency, LRU limits |
+| `POST` | `/api/models/{name}/load` | Load a model into memory now |
+| `POST` | `/api/models/{name}/unload` | Drop the resident instance (idempotent) |
+| `POST` | `/api/models/{name}/reload` | Unload and load again |
+| `POST` | `/api/models` | Resolve a reference and add it to the live catalog |
+| `DELETE` | `/api/models/{name}` | Unload and remove it from the live catalog |
+
+```bash
+curl http://127.0.0.1:8080/api/models
+curl -X POST http://127.0.0.1:8080/api/models/laya-latest/load
+curl -X POST http://127.0.0.1:8080/api/models \
+  -H 'Content-Type: application/json' \
+  -d '{"reference":"hf:convaiinnovations/laya-multilingual"}'
+curl -X DELETE http://127.0.0.1:8080/api/models/laya-multilingual
+```
+
+Adding a reference materializes it through the hub (unless cached) and makes it
+available to `/v1/systemone` immediately. Runtime additions and removals are not
+persisted; `[models]` in `sys1.toml` is authoritative after a restart.
+In-flight requests holding a model handle finish normally.
 
 ## Configuration
 

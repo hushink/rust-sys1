@@ -11,6 +11,12 @@ Strict TypeSafe-compatible System One HTTP server built on axum.
 | `POST` | `/v1/systemone` | Official decision endpoint |
 | `GET` | `/v1/models` | Official model/alias list |
 | `GET` | `/health` | Operational health check, outside `/v1` |
+| `GET` | `/api/models` | Runtime catalog, aliases, and residency (admin) |
+| `POST` | `/api/models/{name}/load` | Load a model into memory |
+| `POST` | `/api/models/{name}/unload` | Drop the resident instance |
+| `POST` | `/api/models/{name}/reload` | Unload and load again |
+| `POST` | `/api/models` | Add a model from a reference (needs a resolver) |
+| `DELETE` | `/api/models/{name}` | Unload and remove from the live catalog |
 
 There is intentionally no `/v1/decisions`.
 
@@ -33,6 +39,40 @@ let app = router(registry.clone(), ServerConfig::default());
 // Or run a standalone server:
 serve("127.0.0.1:8080".parse()?, registry, ServerConfig::default()).await?;
 ```
+
+`/api/*` is disabled unless `ServerConfig::enable_admin` is true. The CLI sets
+it by default. To support `POST /api/models`, build the router with a resolver:
+
+```rust
+use sys1_core::ModelResolver;
+use sys1_server::router_with_resolver;
+
+let resolver: Arc<dyn ModelResolver> = Arc::new(my_resolver);
+let app = router_with_resolver(
+    registry.clone(),
+    ServerConfig { enable_admin: true, ..ServerConfig::default() },
+    Some(resolver),
+);
+```
+
+## Runtime model management
+
+- `ModelRegistry::is_loaded` reports residency; `register`/`unregister` mutate
+  the live catalog and drop resident instances.
+- `POST /api/models` takes `{"reference": "hf:owner/repo"}`, resolves it through
+  the configured `ModelResolver`, and registers every returned manifest. If a
+  returned name already exists, the request fails with `409` and the existing
+  catalog is left intact.
+- `DELETE /api/models/{name}` also calls `ModelResolver::release`, allowing the
+  resolver to forget local directory mappings.
+- Without a resolver, `POST /api/models` returns `501`; load/unload/reload and
+  DELETE still work for configured models.
+- Admin requests use the same Bearer key as `/v1/*`. With no key configured the
+  admin API is open; keep the bind address private.
+- Runtime additions and removals are not persisted. The manifests passed to
+  `ModelRegistry::new` are authoritative after a restart.
+- Unload is idempotent (`was_loaded` reports the previous state). In-flight
+  requests that already hold a model handle finish normally.
 
 ## Behavior
 

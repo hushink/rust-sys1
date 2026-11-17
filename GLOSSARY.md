@@ -98,6 +98,18 @@ _Avoid_: Model selector
 模型权重与配套文件的获取来源，如本地路径、Hugging Face、ModelScope 或自定义模型中心。
 _Avoid_: Downloader、backend
 
+**Model catalog（模型目录）**：
+服务进程当前可选择的模型集合，包含规范名称、别名与 manifest；可在运行时增删。
+_Avoid_: Model list（仅指 `/v1/models` 输出时）、registry（指注册表组件时）
+
+**Model resolver（模型引用解析器）**：
+把外部模型引用（本地路径、hub id、manifest URL）解析为可加载 manifest，并让模型加载器认识该引用的组件。
+_Avoid_: Model source、downloader
+
+**Model residency（模型常驻状态）**：
+模型目录项对应的权重当前是否已加载到内存或显存；与磁盘缓存无关。
+_Avoid_: Cache（磁盘缓存）、loaded（口语）
+
 **Inference backend（推理后端）**：
 执行模型前向计算的引擎，如 candle、ONNX Runtime。
 _Avoid_: Model、engine（作为整体系统时）

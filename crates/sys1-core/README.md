@@ -9,7 +9,9 @@ selection for rust-sys1.
 
 - `DecisionModel`: synchronous `predict(&State, &Questions) -> DecisionOutput`.
 - `ModelFactory`: lazy loading from a `ModelManifest`.
-- `ModelRegistry`: name/alias resolution, lazy loading, LRU, `keep_alive`, model unload.
+- `ModelResolver`: optional runtime resolution of references into loadable manifests.
+- `ModelRegistry`: name/alias resolution, lazy loading, LRU, `keep_alive`, model unload,
+  plus runtime `register` / `unregister` of catalog entries.
 - `Questions` / `Answers`: typed builders and typed accessors.
 - `ModelManifest` / `ModelFile`: the model bundle contract.
 - `DevicePreference` / `ResolvedDevice`: runtime device selection helpers.
@@ -52,6 +54,13 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `max_loaded` evicts the oldest model that is not held by an external `Arc`.
 - `keep_alive` removes idle models on `maintenance()` / `predict()`.
 - In-use models may temporarily exceed `max_loaded`.
+- `register(manifest)` adds a catalog entry; duplicates and alias conflicts are
+  rejected without changing the catalog. `unregister(name)` removes the entry
+  (by name or alias) and drops its resident instance.
+- `is_loaded(name)` reports residency without touching the LRU timestamp.
+- A `ModelResolver` is not part of the registry: callers resolve a reference to
+  manifests, register them, and pass a factory that can load them. The CLI uses
+  this to add hub models while the server is running.
 
 ## Test
 

@@ -37,8 +37,9 @@ let billing = output.answers.noul("billing")?;
 - `sys1::protocol` — `sys1-protocol` 全部
 - `sys1::hub` — `sys1-hub` 全部（feature `hub`）
 - `sys1::laya` — `sys1-laya` 全部（feature `laya`）
-- 扁平别名：`DecisionModel`、`ModelRegistry`、`Questions`、`Answers`、`State`、
-  `Question`、`Answer`、`LayaModel`、`LayaOptions`、`LayaFactory`、`Hub`、`HubConfig`。
+- 扁平别名：`DecisionModel`、`ModelResolver`、`ModelRegistry`、`Questions`、
+  `Answers`、`State`、`Question`、`Answer`、`LayaModel`、`LayaOptions`、
+  `LayaFactory`、`Hub`、`HubConfig`。
 
 ## 测试
 

@@ -1,7 +1,7 @@
 use crate::{LayaModel, LayaOptions, LayaRouter};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use sys1_core::{DecisionModel, ModelError, ModelFactory, ModelManifest};
 
 struct Registered {
@@ -15,10 +15,13 @@ struct RouterRegistered {
 }
 
 /// Loads Laya checkpoints from local directories registered by model name.
+///
+/// Registrations can be added while the server is running; the registry only
+/// requires that a model is registered before it is loaded.
 #[derive(Default)]
 pub struct LayaFactory {
-    models: HashMap<String, Registered>,
-    routers: HashMap<String, RouterRegistered>,
+    models: RwLock<HashMap<String, Registered>>,
+    routers: RwLock<HashMap<String, RouterRegistered>>,
 }
 
 impl LayaFactory {
@@ -27,40 +30,71 @@ impl LayaFactory {
     }
 
     pub fn register(
-        &mut self,
+        &self,
         name: impl Into<String>,
         directory: impl Into<PathBuf>,
         options: LayaOptions,
     ) {
-        self.models.insert(
-            name.into(),
-            Registered {
+        self.models
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(name.into())
+            .or_insert_with(|| Registered {
                 directory: directory.into(),
                 options,
-            },
-        );
+            });
     }
 
     pub fn register_router(
-        &mut self,
+        &self,
         name: impl Into<String>,
         root: impl Into<PathBuf>,
         options: LayaOptions,
     ) {
-        self.routers.insert(
-            name.into(),
-            RouterRegistered {
+        self.routers
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(name.into())
+            .or_insert_with(|| RouterRegistered {
                 root: root.into(),
                 options,
-            },
-        );
+            });
     }
 
-    pub fn registered(&self) -> impl Iterator<Item = &str> {
-        self.models
-            .keys()
-            .chain(self.routers.keys())
-            .map(String::as_str)
+    /// Forget a checkpoint or router registration.
+    pub fn unregister(&self, name: &str) -> bool {
+        let checkpoint = self
+            .models
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(name)
+            .is_some();
+        let router = self
+            .routers
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(name)
+            .is_some();
+        checkpoint || router
+    }
+
+    pub fn registered(&self) -> Vec<String> {
+        let mut names = BTreeSet::new();
+        names.extend(
+            self.models
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .keys()
+                .cloned(),
+        );
+        names.extend(
+            self.routers
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .keys()
+                .cloned(),
+        );
+        names.into_iter().collect()
     }
 }
 
@@ -73,20 +107,35 @@ impl ModelFactory for LayaFactory {
             )));
         }
 
-        if let Some(router) = self.routers.get(&manifest.name) {
-            return Ok(Arc::new(LayaRouter::new(
-                &router.root,
-                router.options.clone(),
-            )));
+        let router = {
+            let routers = self
+                .routers
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            routers
+                .get(&manifest.name)
+                .map(|registered| (registered.root.clone(), registered.options.clone()))
+        };
+        if let Some((root, options)) = router {
+            return Ok(Arc::new(LayaRouter::new(&root, options)));
         }
 
-        let registered = self.models.get(&manifest.name).ok_or_else(|| {
-            ModelError::load(format!(
+        let registered = {
+            let models = self
+                .models
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            models
+                .get(&manifest.name)
+                .map(|registered| (registered.directory.clone(), registered.options.clone()))
+        };
+        let Some((directory, options)) = registered else {
+            return Err(ModelError::load(format!(
                 "no local Laya directory registered for model `{}`",
                 manifest.name
-            ))
-        })?;
-        let model = LayaModel::load_dir(&registered.directory, registered.options.clone())?;
+            )));
+        };
+        let model = LayaModel::load_dir(&directory, options)?;
         Ok(Arc::new(model))
     }
 }

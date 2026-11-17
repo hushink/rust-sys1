@@ -8,7 +8,9 @@ rust-sys1 的核心 trait、manifest、模型注册表、typed 进程内 API 与
 
 - `DecisionModel`：同步 `predict(&State, &Questions) -> DecisionOutput`。
 - `ModelFactory`：从 `ModelManifest` 懒加载模型。
-- `ModelRegistry`：名称/别名解析、懒加载、LRU、`keep_alive`、卸载。
+- `ModelResolver`：可选的运行时引用解析，把外部引用变成可加载的 manifest。
+- `ModelRegistry`：名称/别名解析、懒加载、LRU、`keep_alive`、卸载，以及运行时
+  `register` / `unregister` 修改目录。
 - `Questions` / `Answers`：typed builder 与类型化读取。
 - `ModelManifest` / `ModelFile`：模型包契约。
 - `DevicePreference` / `ResolvedDevice`：运行时设备选择辅助类型。
@@ -51,6 +53,11 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `max_loaded` 会淘汰最老且没有外部 `Arc` 持有的模型。
 - `keep_alive` 在 `maintenance()` / `predict()` 时清理空闲模型。
 - 正在使用的模型可能临时超过 `max_loaded`。
+- `register(manifest)` 添加目录项；重名和别名冲突会被拒绝，目录保持不变。
+  `unregister(name)` 按名称或别名移除目录项并丢弃常驻实例。
+- `is_loaded(name)` 查询常驻状态，不刷新 LRU 时间。
+- `ModelResolver` 不属于注册表：调用方把引用解析成 manifest、注册它们，并提供
+  能加载这些 manifest 的 factory。CLI 用它实现服务运行期间从 hub 添加模型。
 
 ## 测试
 
