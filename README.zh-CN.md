@@ -353,6 +353,9 @@ Laya 官方 golden 测试默认忽略，需要本地权重与官方 golden vecto
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
 $env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
 cargo test -p sys1-laya -- --ignored --nocapture
+
+# 长上下文 local-window 对齐（CUDA，本地 checkpoint）
+cargo test --release -p sys1-laya --features cuda --test long_context -- --ignored --nocapture
 ```
 
 ## 已知缺口 / Roadmap

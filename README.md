@@ -375,6 +375,9 @@ the official golden vectors:
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
 $env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
 cargo test -p sys1-laya -- --ignored --nocapture
+
+# Long-context exact local-window parity (CUDA, cached checkpoint)
+cargo test --release -p sys1-laya --features cuda --test long_context -- --ignored --nocapture
 ```
 
 ## Known gaps / roadmap
