@@ -1,0 +1,86 @@
+name: GPU
+
+# Optional CUDA smoke tests. Requires a self-hosted Linux runner labeled
+# `linux` + `gpu` + `cuda` and a repository variable SYS1_LAYA_TEST_ROOT
+# pointing at a local Laya multilingual checkpoint directory.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - "crates/sys1-laya/**"
+      - "crates/sys1-cli/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/gpu.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cuda:
+    runs-on: [self-hosted, linux, gpu, cuda]
+    env:
+      SYS1_LAYA_TEST_ROOT: ${{ vars.SYS1_LAYA_TEST_ROOT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Require a cached checkpoint
+        shell: bash
+        run: |
+          if [ -z "$SYS1_LAYA_TEST_ROOT" ]; then
+            echo "Set the SYS1_LAYA_TEST_ROOT repository variable to a Laya multilingual checkpoint directory." >&2
+            exit 1
+          fi
+
+      - name: Long-context exact local-window parity
+        run: >-
+          cargo test --release -p sys1-laya --features cuda
+          --test long_context -- --ignored --nocapture
+
+      - name: Build server and load generator
+        run: |
+          cargo build --release -p sys1-cli --features cuda
+          cargo build --release -p sys1-cli --features cuda --example loadgen
+
+      - name: Loadgen smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          target/release/sys1 serve \
+            --bind 127.0.0.1:18080 \
+            --device cuda:0 \
+            --dtype f16 \
+            --batch-max 8 \
+            --model "laya-latest=local:$SYS1_LAYA_TEST_ROOT" \
+            > server.log 2>&1 &
+          echo $! > server.pid
+          trap 'kill "$(cat server.pid)" 2>/dev/null || true' EXIT
+
+          ready=0
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:18080/health >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo "server did not become healthy" >&2
+            exit 1
+          fi
+
+          target/release/examples/loadgen \
+            --url http://127.0.0.1:18080 \
+            --model laya-latest \
+            --concurrency 2 \
+            --requests 8 \
+            --warmup 1 \
+            --timeout-ms 60000
+
+      - name: Server log
+        if: failure()
+        shell: bash
+        run: tail -n 100 server.log || true

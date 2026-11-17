@@ -401,8 +401,14 @@ cargo test --offline --workspace
 ```
 
 Hub tests spin up a loopback HTTP model center and cover manifest resolution,
-Bearer tokens, and Range-resumed downloads. Laya golden tests are ignored by
-default because they need local checkpoints and the official golden vectors:
+Bearer tokens, and Range-resumed downloads. CI runs fmt, clippy, and tests on
+Linux, Windows, and macOS (`.github/workflows/ci.yml`). The optional
+`.github/workflows/gpu.yml` runs the long-context parity test and a loadgen
+smoke test on a self-hosted Linux `gpu` + `cuda` runner; set the repository
+variable `SYS1_LAYA_TEST_ROOT` to a cached multilingual checkpoint.
+
+Laya golden tests are ignored by default because they need local checkpoints
+and the official golden vectors:
 
 ```bash
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
@@ -428,7 +434,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
   than F32 on a representative 2304×768×1024 layer and `Q4_0` was slower, so it
   was not integrated; MKL crates are not available in the offline cache.
 - The `laya-latest` router is heuristic; full official routing golden parity is pending.
-- HF / ModelScope live-download integration tests; GPU runtime CI.
+- HF / ModelScope live-download integration tests.
 - Laya weight license must be checked before redistribution. The repo does not bundle weights.
 
 ## Documentation

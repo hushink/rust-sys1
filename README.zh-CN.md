@@ -377,7 +377,12 @@ cargo test --offline --workspace
 ```
 
 Hub 测试会启动本地回环 HTTP 模型中心，覆盖 manifest 解析、Bearer token 和
-Range 断点续传。Laya 官方 golden 测试默认忽略，需要本地权重与官方 golden vectors：
+Range 断点续传。CI 在 Linux、Windows、macOS 上运行 fmt、clippy 与测试
+（`.github/workflows/ci.yml`）。可选的 `.github/workflows/gpu.yml` 在
+self-hosted Linux `gpu` + `cuda` runner 上运行长上下文对齐与 loadgen 冒烟测试；
+需要把仓库变量 `SYS1_LAYA_TEST_ROOT` 指向已缓存的 multilingual checkpoint。
+
+Laya 官方 golden 测试默认忽略，需要本地权重与官方 golden vectors：
 
 ```powershell
 $env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
@@ -400,7 +405,7 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 - CPU int8 量化 / MKL。用 candle `Q8_0` 对代表性 2304×768×1024 层做 GEMM 探测只比
   F32 快约 6%，`Q4_0` 更慢，因此未集成；MKL crate 不在离线缓存中。
 - `laya-latest` Router 目前是启发式；完整官方 routing golden 对齐待补。
-- HF / ModelScope 在线下载集成测试；GPU runtime CI。
+- HF / ModelScope 在线下载集成测试。
 - Laya 权重再分发前需确认许可证；仓库不包含权重。
 
 ## 文档

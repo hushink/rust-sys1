@@ -176,6 +176,7 @@ let tone = answers.choice("tone")?;   // 类型化读取
 - 已用本地缓存权重验证：`sys1 run`、`sys1 serve` 的 `/v1/models`、`/v1/systemone`、`/health`、gzip 请求；`laya-latest` 选中 English 并成功加载。
 - 已用本地缓存权重验证运行时管理：`/api/models` 列表、load/unload/reload、按 `local:` 引用动态添加、推理、删除；CPU F32 multilingual 冷加载约 12 s。
 - 已用本地回环 HTTP 模型中心验证：manifest 解析、相对文件 URL、Bearer token、Range 断点续传，以及 `[models]` 名称映射。
+- CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。
 - 待补：zstd、完整 routing golden、long/act/abstention/parallel、ONNX/ORT/TensorRT、GPU 实机 CI。
 
