@@ -2667,8 +2667,24 @@ dependencies = [
  "sys1-laya",
  "sys1-ort",
  "sys1-protocol",
+ "sys1-qwen3guard",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sys1-clef"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-protocol",
+ "sys1-qwen",
+ "tokenizers",
 ]
 
 [[package]]
@@ -2704,6 +2720,38 @@ dependencies = [
  "serde_json",
  "sys1-protocol",
  "thiserror 2.0.21",
+ "unicode-general-category",
+]
+
+[[package]]
+name = "sys1-decima"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-modernbert",
+ "sys1-protocol",
+ "tokenizers",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "sys1-decision"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-protocol",
+ "sys1-qwen",
+ "tokenizers",
 ]
 
 [[package]]
@@ -2711,10 +2759,16 @@ name = "sys1-families"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "sys1-clef",
  "sys1-core",
+ "sys1-decima",
+ "sys1-decision",
  "sys1-gliclass",
+ "sys1-kev",
  "sys1-laya",
  "sys1-nli",
+ "sys1-qwen3guard",
+ "sys1-von",
 ]
 
 [[package]]
@@ -2748,6 +2802,21 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sys1-kev"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-protocol",
+ "sys1-qwen",
+ "tokenizers",
 ]
 
 [[package]]
@@ -2815,6 +2884,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "sys1-qwen"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sys1-qwen3guard"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-protocol",
+ "sys1-qwen",
+ "tokenizers",
+]
+
+[[package]]
 name = "sys1-server"
 version = "0.1.0"
 dependencies = [
@@ -2832,6 +2926,21 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "sys1-von"
+version = "0.1.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sys1-core",
+ "sys1-modernbert",
+ "sys1-protocol",
+ "tokenizers",
 ]
 
 [[package]]
@@ -3185,6 +3294,15 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-normalization-alignments"

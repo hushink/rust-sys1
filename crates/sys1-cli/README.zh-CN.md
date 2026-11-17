@@ -36,12 +36,23 @@ sys1 run local:/path/to/gliclass-edge --input request.json
 - **Laya**（`sys1-laya`）：`english`、`multilingual`、`typed-decisions`。
 - **NLI**（`sys1-nli`）：`MoritzLaurer/ModernBERT-{base,large}-zeroshot-v2.0`。
 - **GLiClass**（`sys1-gliclass`）：`knowledgator/gliclass-instruct-edge-v1.0`。
+- **Qwen3Guard**（`sys1-qwen3guard`）：`Qwen/Qwen3Guard-Gen-0.6B`（预设问题）。
+- **Von**（`sys1-von`）：`wfzyx/von`。
+- **Decima**（`sys1-decima`）：`amyrmahdy/decima-base`。
+- **Kev**（`sys1-kev`）：`jaredpalmer/kev-0.8b` 加对应 Qwen3.5 base。
+- **Decision**（`sys1-decision`）：`vllm-sr/Decision-1.0-Eos-0.8B`。
+- **Clef**（`sys1-clef`）：`Cloudflare/clef-flash`（纯文本，9B）。
 
 每个模型族都可以从本地目录或 `hf:` 引用启动：
 
 ```bash
 sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
 sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
+sys1 serve --model qwen3guard=hf:Qwen/Qwen3Guard-Gen-0.6B
+sys1 serve --model von=hf:wfzyx/von
+sys1 serve --model decima=hf:amyrmahdy/decima-base
+sys1 serve --model decision=hf:vllm-sr/Decision-1.0-Eos-0.8B
+sys1 serve --model clef=hf:Cloudflare/clef-flash
 ```
 
 ## ONNX 模型

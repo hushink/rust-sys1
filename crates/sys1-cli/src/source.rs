@@ -103,6 +103,11 @@ mod tests {
         fs::write(directory.join("tokenizer.json"), b"{}").expect("tokenizer");
     }
 
+    fn von_checkpoint(directory: &Path) {
+        nli_checkpoint(directory);
+        fs::write(directory.join("option_marker.pt"), b"x").expect("marker weights");
+    }
+
     #[test]
     fn resolves_configured_names_and_releases_them() {
         let root =
@@ -134,6 +139,18 @@ mod tests {
         assert!(resolver.release("custom-name"));
         resolver.replace_references(IndexMap::new());
 
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn recognises_von_before_nli() {
+        let root = std::env::temp_dir().join(format!("sys1-resolver-{}-von", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("von dir");
+        von_checkpoint(&root);
+        assert!(is_supported_directory(&root));
+        let (manifest, _) = local_manifest(&root).expect("manifest");
+        assert_eq!(manifest.family, "von");
         fs::remove_dir_all(root).expect("cleanup");
     }
 

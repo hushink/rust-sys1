@@ -81,6 +81,9 @@ impl ModelFactory for NliFactory {
 /// Whether `directory` is a ModernBERT zero-shot NLI checkpoint laid out like
 /// the `MoritzLaurer/*-zeroshot-v2.0` repositories.
 pub fn is_nli_directory(directory: &Path) -> bool {
+    if directory.join("option_marker.pt").is_file() {
+        return false;
+    }
     let config_path = directory.join("config.json");
     let weights = directory.join("model.safetensors");
     let tokenizer = directory.join("tokenizer.json").is_file()

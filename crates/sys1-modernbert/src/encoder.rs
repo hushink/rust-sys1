@@ -355,11 +355,18 @@ impl Encoder {
             config.local_rope_theta(),
             vb.device(),
         )?);
+        let path = |suffix: &str| {
+            if path_prefix.is_empty() {
+                suffix.to_owned()
+            } else {
+                format!("{path_prefix}.{suffix}")
+            }
+        };
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for index in 0..config.num_hidden_layers {
             let local = index % config.global_attn_every_n_layers != 0;
             layers.push(Layer::load(
-                vb.pp(format!("{path_prefix}.layers.{index}")),
+                vb.pp(path(&format!("layers.{index}"))),
                 config,
                 if local {
                     local_rotary.clone()
@@ -375,19 +382,11 @@ impl Encoder {
             embeddings: embedding(
                 config.vocab_size,
                 config.hidden_size,
-                vb.pp(format!("{path_prefix}.embeddings.tok_embeddings")),
+                vb.pp(path("embeddings.tok_embeddings")),
             )?,
-            norm: layer_norm_no_bias(
-                config.hidden_size,
-                eps,
-                vb.pp(format!("{path_prefix}.embeddings.norm")),
-            )?,
+            norm: layer_norm_no_bias(config.hidden_size, eps, vb.pp(path("embeddings.norm")))?,
             layers,
-            final_norm: layer_norm_no_bias(
-                config.hidden_size,
-                eps,
-                vb.pp(format!("{path_prefix}.final_norm")),
-            )?,
+            final_norm: layer_norm_no_bias(config.hidden_size, eps, vb.pp(path("final_norm")))?,
             local_attention_size: config.local_attention,
             use_local_window,
             dtype: vb.dtype(),

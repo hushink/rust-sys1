@@ -18,6 +18,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+sys1-qwen3guard = { path = "../sys1-qwen3guard" }
 
 [features]
 default = ["laya", "hub", "families"]
@@ -25,10 +26,10 @@ laya = ["dep:sys1-laya"]
 hub = ["dep:sys1-hub"]
 families = ["dep:sys1-families"]
 onnx = ["dep:sys1-ort", "sys1-laya?/onnx", "sys1-families?/onnx"]
-cuda = ["sys1-laya?/cuda"]
-cudnn = ["sys1-laya?/cudnn"]
-metal = ["sys1-laya?/metal"]
-accelerate = ["sys1-laya?/accelerate"]
+cuda = ["sys1-laya?/cuda", "sys1-families?/cuda"]
+cudnn = ["sys1-laya?/cudnn", "sys1-families?/cudnn"]
+metal = ["sys1-laya?/metal", "sys1-families?/metal"]
+accelerate = ["sys1-laya?/accelerate", "sys1-families?/accelerate"]
 ort-cuda = ["onnx", "sys1-laya?/ort-cuda"]
 ort-tensorrt = ["onnx", "sys1-laya?/ort-tensorrt"]
 ort-directml = ["onnx", "sys1-laya?/ort-directml"]

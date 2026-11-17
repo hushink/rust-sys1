@@ -932,7 +932,7 @@ fn build_models(
         let pulled = pull_model(hub, &reference)?;
         if !is_supported_directory(&pulled.directory) {
             bail!(
-                "{reference} does not look like a supported model directory (Laya, NLI, or GLiClass)"
+                "{reference} does not look like a supported model directory (Laya, NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision, or Clef)"
             );
         }
         if name == "laya-latest" && !has_checkpoint_variants(&pulled.directory) {

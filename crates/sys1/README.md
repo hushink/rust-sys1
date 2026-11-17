@@ -12,7 +12,8 @@ sys1 = { path = "../sys1" }
 ```
 
 Default features: `laya`, `hub`, `families`. `families` adds the shared
-Laya/NLI/GLiClass dispatcher. Optional backend/accelerator features: `onnx`,
+dispatcher for Laya, NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision and
+Clef. Optional backend/accelerator features: `onnx`,
 `cuda`, `cudnn`, `metal`, `accelerate`, and the ONNX Runtime execution
 providers `ort-cuda`, `ort-tensorrt`, `ort-directml`, `ort-coreml`.
 `InferenceEngine` requires `laya`, `hub`, and `families` (the default set).
@@ -38,9 +39,10 @@ let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`InferenceEngine` also accepts NLI and GLiClass directories; the family is
-detected from the checkpoint. Use the catalog name returned by `models()` (or
-the directory name) as the `predict` model argument.
+`InferenceEngine` also accepts NLI, GLiClass, Qwen3Guard, Von, Decima, Kev,
+Decision and Clef directories; the family is detected from the checkpoint. Use
+the catalog name returned by `models()` (or the directory name) as the `predict`
+model argument.
 
 The direct checkpoint API is unchanged and remains available alongside the
 engine:
@@ -92,8 +94,8 @@ contract and `onnx.json` options. `sys1::ort` re-exports the raw
   register a model immediately.
 - `add` / `add_as` pull references through the hub, materialize the checkpoint,
   register the backend, and add manifests to the registry. A Laya repository
-  root registers a router plus its variants; NLI and GLiClass directories are
-  auto-detected.
+  root registers a router plus its variants; the other candle families are
+  auto-detected from their checkpoint layouts.
 - `load` / `unload` / `loaded_models` / `is_loaded` control residency;
   `models` / `model` inspect the catalog; `remove` unloads and unregisters.
 - `predict` returns typed `DecisionOutput`; `systemone` returns the official

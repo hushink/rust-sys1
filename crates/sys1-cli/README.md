@@ -37,12 +37,23 @@ Supported candle families:
 - **Laya** (`sys1-laya`): `english`, `multilingual`, `typed-decisions`.
 - **NLI** (`sys1-nli`): `MoritzLaurer/ModernBERT-{base,large}-zeroshot-v2.0`.
 - **GLiClass** (`sys1-gliclass`): `knowledgator/gliclass-instruct-edge-v1.0`.
+- **Qwen3Guard** (`sys1-qwen3guard`): `Qwen/Qwen3Guard-Gen-0.6B` (preset questions).
+- **Von** (`sys1-von`): `wfzyx/von`.
+- **Decima** (`sys1-decima`): `amyrmahdy/decima-base`.
+- **Kev** (`sys1-kev`): `jaredpalmer/kev-0.8b` plus its Qwen3.5 base.
+- **Decision** (`sys1-decision`): `vllm-sr/Decision-1.0-Eos-0.8B`.
+- **Clef** (`sys1-clef`): `Cloudflare/clef-flash` (text only, 9B).
 
 Each family can be served from a local path or an `hf:` reference:
 
 ```bash
 sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
 sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
+sys1 serve --model qwen3guard=hf:Qwen/Qwen3Guard-Gen-0.6B
+sys1 serve --model von=hf:wfzyx/von
+sys1 serve --model decima=hf:amyrmahdy/decima-base
+sys1 serve --model decision=hf:vllm-sr/Decision-1.0-Eos-0.8B
+sys1 serve --model clef=hf:Cloudflare/clef-flash
 ```
 
 ## ONNX models

@@ -46,6 +46,16 @@ pub struct ModernBertConfig {
     pub global_rope_theta: Option<f64>,
     #[serde(default)]
     pub local_rope_theta: Option<f64>,
+    #[serde(default)]
+    pub bos_token_id: Option<u32>,
+    #[serde(default)]
+    pub eos_token_id: Option<u32>,
+    #[serde(default)]
+    pub cls_token_id: Option<u32>,
+    #[serde(default)]
+    pub sep_token_id: Option<u32>,
+    #[serde(default)]
+    pub pad_token_id: Option<u32>,
 }
 
 impl ModernBertConfig {

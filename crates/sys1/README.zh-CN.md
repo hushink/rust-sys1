@@ -11,8 +11,8 @@ rust-sys1 进程内 API 的 umbrella crate。
 sys1 = { path = "../sys1" }
 ```
 
-默认 feature：`laya`、`hub`、`families`。`families` 增加 Laya/NLI/GLiClass
-统一分发。可选后端/加速 feature：`onnx`、`cuda`、`cudnn`、`metal`、`accelerate`，
+默认 feature：`laya`、`hub`、`families`。`families` 增加 Laya、NLI、GLiClass、
+Qwen3Guard、Von、Decima、Kev、Decision 与 Clef 的统一分发。可选后端/加速 feature：`onnx`、`cuda`、`cudnn`、`metal`、`accelerate`，
 以及 ONNX Runtime 执行提供器 `ort-cuda`、`ort-tensorrt`、`ort-directml`、
 `ort-coreml`。`InferenceEngine` 需要同时启用 `laya`、`hub` 与 `families`
 （即默认集合）。
@@ -38,8 +38,9 @@ let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`InferenceEngine` 也接受 NLI 与 GLiClass 目录，模型族会从 checkpoint 自动识别；
-`predict` 的模型参数使用 `models()` 返回的目录名或目录名称。
+`InferenceEngine` 也接受 NLI、GLiClass、Qwen3Guard、Von、Decima、Kev、
+Decision 与 Clef 目录，模型族会从 checkpoint 自动识别；`predict` 的模型参数使用
+`models()` 返回的目录名或目录名称。
 
 原来的直接 checkpoint API 保持不变，可与 engine 并存：
 
@@ -87,7 +88,8 @@ let output = model.predict(
   `model`（`ModelOptions`：device、dtype、上下文长度、confidence、attention）分组。
 - `InferenceEngine::new` 创建空目录；`from_reference` / `from_directory` 立即注册模型。
 - `add` / `add_as` 通过 hub 拉取引用、物化 checkpoint、注册后端并写入注册表。
-  Laya 仓库根目录会注册 router 与各变体；NLI 与 GLiClass 目录会自动识别。
+  Laya 仓库根目录会注册 router 与各变体；其他 candle 模型族会按 checkpoint
+  布局自动识别。
 - `load` / `unload` / `loaded_models` / `is_loaded` 控制常驻；`models` / `model`
   查看目录；`remove` 卸载并移除。
 - `predict` 返回 typed `DecisionOutput`；`systemone` 返回官方

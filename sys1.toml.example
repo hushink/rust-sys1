@@ -58,6 +58,13 @@ laya-latest = "local:D:/models/laya"
 # laya-onnx = "local:D:/models/laya-onnx"
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 # laya-typed-decisions = "https://example.com/models/laya-typed-decisions/model.json"
-# Small candle families are detected from the checkpoint config:
+# Candle families are detected from the checkpoint layout/config:
 # nli = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
 # gliclass = "hf:knowledgator/gliclass-instruct-edge-v1.0"
+# qwen3guard = "hf:Qwen/Qwen3Guard-Gen-0.6B"
+# von = "hf:wfzyx/von"
+# decima = "hf:amyrmahdy/decima-base"
+# decision = "hf:vllm-sr/Decision-1.0-Eos-0.8B"
+# clef = "hf:Cloudflare/clef-flash"
+# Kev needs its Qwen3.5 base beside the adapter or under base/:
+# kev = "local:D:/models/kev-0.8b"

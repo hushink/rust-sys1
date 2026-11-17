@@ -5,8 +5,9 @@
 Type-safe in-process System One inference plus a TypeSafe-compatible HTTP service.
 
 `rust-sys1` runs open decision models locally and exposes the official
-`POST /v1/systemone` / `GET /v1/models` wire contract. v1 ships Laya
-(`english`, `multilingual`, `typed-decisions`) with a lazy `laya-latest` router.
+`POST /v1/systemone` / `GET /v1/models` wire contract. It ships Laya
+(`english`, `multilingual`, `typed-decisions`) with a lazy `laya-latest` router,
+plus NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision 1.0 and Clef.
 
 ## Features
 
@@ -14,7 +15,10 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Process-in inference: typed `Questions` / `Answers`, no HTTP or serialization required.
 - `InferenceEngine`: one object wires the hub, manifest, backend factory, registry, and typed inference.
 - Typed extensions: long-context scanning, `min_confidence` abstention, and act-head probabilities.
-- Multiple families in candle: Laya, NLI (ModernBERT zero-shot), and GLiClass (32M edge).
+- Multiple families in candle: Laya, NLI, GLiClass, Qwen3Guard, Von, Decima,
+  Kev, Decision 1.0 and Clef, with automatic checkpoint detection.
+- Decoder backbones: Qwen3 and Qwen3.5 (Gated DeltaNet + gated attention),
+  including PEFT LoRA merge and tied/untied LM heads.
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
 - Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
 - Pure NumPy Laya-to-ONNX exporter with official golden logits within 2.5e-6.
@@ -36,7 +40,14 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 | [`sys1-modernbert`](crates/sys1-modernbert/README.md) | Shared candle ModernBERT encoder |
 | [`sys1-nli`](crates/sys1-nli/README.md) | ModernBERT zero-shot NLI decision model |
 | [`sys1-gliclass`](crates/sys1-gliclass/README.md) | GLiClass uni-encoder decision model (32M edge) |
-| [`sys1-families`](crates/sys1-families/README.md) | Family detection and dispatch for Laya/NLI/GLiClass |
+| [`sys1-qwen`](crates/sys1-qwen/README.md) | Shared candle Qwen3 / Qwen3.5 decoder backbones |
+| [`sys1-qwen3guard`](crates/sys1-qwen3guard/README.md) | Qwen3Guard Gen fixed-preset safety model |
+| [`sys1-von`](crates/sys1-von/README.md) | Von 1.1 option-marker encoder |
+| [`sys1-decima`](crates/sys1-decima/README.md) | Decima late-interaction encoder |
+| [`sys1-kev`](crates/sys1-kev/README.md) | Kev pointer-head decoder |
+| [`sys1-decision`](crates/sys1-decision/README.md) | Decision 1.0 endpoint-head decoder |
+| [`sys1-clef`](crates/sys1-clef/README.md) | Clef joint-schema decoder |
+| [`sys1-families`](crates/sys1-families/README.md) | Family detection and dispatch for all compiled families |
 | [`sys1-ort`](crates/sys1-ort/README.md) | Dynamically loaded ONNX Runtime session and token-scoring layer |
 | [`sys1-server`](crates/sys1-server/README.md) | Axum server for `/v1/*` and `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.md) | `sys1` binary: serve/pull/list/show/rm/run/doctor |
@@ -113,9 +124,13 @@ sys1 serve --model laya-multilingual=local:/path/to/laya-multilingual
 # laya-typed-decisions and enables the lazy laya-latest router
 sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 
-# Small candle families (auto-detected from the checkpoint config):
+# Candle families (auto-detected from the checkpoint layout):
 sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
 sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
+sys1 serve --model qwen3guard=hf:Qwen/Qwen3Guard-Gen-0.6B
+sys1 serve --model von=hf:wfzyx/von
+sys1 serve --model decima=hf:amyrmahdy/decima-base
+sys1 serve --model decision=hf:vllm-sr/Decision-1.0-Eos-0.8B
 ```
 
 Default bind is `127.0.0.1:8080`. Optional Bearer auth:
@@ -605,11 +620,22 @@ uv sync --all-extras
 uv run --package sys1-tools --group dev ruff check python/tools
 uv run sys1-generate-scoring-stub
 
-# Small candle families: NLI and GLiClass against upstream Python
+# Candle families against upstream Python / transformers references
 $env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
 cargo test -p sys1-nli --test nli -- --ignored --nocapture
 $env:SYS1_GLICLASS_TEST_DIR="D:/models/gliclass-edge"
 cargo test -p sys1-gliclass --test gliclass -- --ignored --nocapture
+$env:SYS1_QWEN3GUARD_TEST_DIR="D:/models/qwen3guard"
+cargo test -p sys1-qwen3guard --test qwen3guard -- --ignored --nocapture
+$env:SYS1_VON_TEST_DIR="D:/models/von"
+cargo test -p sys1-von --test von -- --ignored --nocapture
+$env:SYS1_DECIMA_TEST_DIR="D:/models/decima-base"
+cargo test -p sys1-decima --test decima -- --ignored --nocapture
+$env:SYS1_KEV_TEST_DIR="D:/models/kev-0.8b"
+$env:SYS1_KEV_BASE_DIR="D:/models/qwen3.5-0.8b-base"
+cargo test -p sys1-kev --test kev -- --ignored --nocapture
+$env:SYS1_DECISION_TEST_DIR="D:/models/decision-eos-0.8b"
+cargo test -p sys1-decision --test decision -- --ignored --nocapture
 cargo test -p sys1 --test families -- --ignored --nocapture
 ```
 

@@ -14,7 +14,10 @@
 - 进程内推理：typed `Questions` / `Answers`，不经过 HTTP 与序列化。
 - `InferenceEngine`：一个对象串起 hub、manifest、后端 factory、注册表与 typed 推理。
 - typed 扩展：长上下文扫描、`min_confidence` abstention 与 act-head 概率。
-- 多模型族（candle）：Laya、NLI（ModernBERT zero-shot）与 GLiClass（32M edge）。
+- 多模型族（candle）：Laya、NLI、GLiClass、Qwen3Guard、Von、Decima、Kev、
+  Decision 1.0 与 Clef，自动识别 checkpoint。
+- 解码器骨干：Qwen3 与 Qwen3.5（Gated DeltaNet + gated attention），支持 PEFT
+  LoRA 合并与 tied/untied LM head。
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
 - 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
 - 纯 NumPy 的 Laya→ONNX 导出器，与官方 golden logits 最大误差 2.5e-6。
@@ -36,7 +39,14 @@
 | [`sys1-modernbert`](crates/sys1-modernbert/README.zh-CN.md) | 共享 candle ModernBERT 编码器 |
 | [`sys1-nli`](crates/sys1-nli/README.zh-CN.md) | ModernBERT zero-shot NLI 决策模型 |
 | [`sys1-gliclass`](crates/sys1-gliclass/README.zh-CN.md) | GLiClass uni-encoder 决策模型（32M edge） |
-| [`sys1-families`](crates/sys1-families/README.zh-CN.md) | Laya/NLI/GLiClass 的族识别与分发 |
+| [`sys1-qwen`](crates/sys1-qwen/README.zh-CN.md) | 共享 candle Qwen3 / Qwen3.5 解码器骨干 |
+| [`sys1-qwen3guard`](crates/sys1-qwen3guard/README.zh-CN.md) | Qwen3Guard Gen 固定预设安全模型 |
+| [`sys1-von`](crates/sys1-von/README.zh-CN.md) | Von 1.1 option-marker 编码器 |
+| [`sys1-decima`](crates/sys1-decima/README.zh-CN.md) | Decima late-interaction 编码器 |
+| [`sys1-kev`](crates/sys1-kev/README.zh-CN.md) | Kev pointer-head 解码器 |
+| [`sys1-decision`](crates/sys1-decision/README.zh-CN.md) | Decision 1.0 endpoint-head 解码器 |
+| [`sys1-clef`](crates/sys1-clef/README.zh-CN.md) | Clef joint-schema 解码器 |
+| [`sys1-families`](crates/sys1-families/README.zh-CN.md) | 所有已编译模型族的识别与分发 |
 | [`sys1-ort`](crates/sys1-ort/README.zh-CN.md) | 动态加载的 ONNX Runtime session 与 token-scoring 层 |
 | [`sys1-server`](crates/sys1-server/README.zh-CN.md) | axum `/v1/*` 与 `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.zh-CN.md) | `sys1` 二进制：serve/pull/list/show/rm/run/doctor |
@@ -561,11 +571,22 @@ uv sync --all-extras
 uv run --package sys1-tools --group dev ruff check python/tools
 uv run sys1-generate-scoring-stub
 
-# 小型 candle 模型族：NLI 与 GLiClass 对上游 Python 参考
+# candle 模型族对上游 Python / transformers 参考
 $env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
 cargo test -p sys1-nli --test nli -- --ignored --nocapture
 $env:SYS1_GLICLASS_TEST_DIR="D:/models/gliclass-edge"
 cargo test -p sys1-gliclass --test gliclass -- --ignored --nocapture
+$env:SYS1_QWEN3GUARD_TEST_DIR="D:/models/qwen3guard"
+cargo test -p sys1-qwen3guard --test qwen3guard -- --ignored --nocapture
+$env:SYS1_VON_TEST_DIR="D:/models/von"
+cargo test -p sys1-von --test von -- --ignored --nocapture
+$env:SYS1_DECIMA_TEST_DIR="D:/models/decima-base"
+cargo test -p sys1-decima --test decima -- --ignored --nocapture
+$env:SYS1_KEV_TEST_DIR="D:/models/kev-0.8b"
+$env:SYS1_KEV_BASE_DIR="D:/models/qwen3.5-0.8b-base"
+cargo test -p sys1-kev --test kev -- --ignored --nocapture
+$env:SYS1_DECISION_TEST_DIR="D:/models/decision-eos-0.8b"
+cargo test -p sys1-decision --test decision -- --ignored --nocapture
 cargo test -p sys1 --test families -- --ignored --nocapture
 ```
 

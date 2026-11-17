@@ -17,3 +17,10 @@ tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[features]
+default = []
+cuda = ["sys1-modernbert/cuda", "candle-core/cuda", "candle-nn/cuda"]
+cudnn = ["cuda", "sys1-modernbert/cudnn", "candle-core/cudnn", "candle-nn/cudnn"]
+metal = ["sys1-modernbert/metal", "candle-core/metal", "candle-nn/metal"]
+accelerate = ["sys1-modernbert/accelerate", "candle-core/accelerate", "candle-nn/accelerate"]

@@ -123,6 +123,38 @@ _Avoid_: 文本分类器（仅指普通单文本分类时）
 Knowledgator 的 zero-shot 分类模型族；label 与文本共享一条序列，通过 label span 池化与 MLP 打分。
 _Avoid_: NLI（实现与训练目标不同）
 
+**Qwen3Guard**：
+Qwen 的固定预设安全模型族；策略、标签与输出格式写在其 chat template 中，只回答自带的 safety/category 问题。
+_Avoid_: Moderation API、classifier
+
+**Von**：
+ModernBERT-large 编码器加 option-marker scorer 的模型族；每个选项在一条序列中占一个 `[MASK]`。
+_Avoid_: Laya（序列布局与打分头不同）
+
+**Decima**：
+编码器加 late-interaction scorer 的模型族；state 与每个选项分别编码，选项通过 cross-attention 读取 state。
+_Avoid_: Cross-encoder（选项之间不共享上下文）
+
+**Kev**：
+Qwen3.5 base + LoRA + pointer head 的模型族；decide token 与每个选项闭合 token 做点积。
+_Avoid_: Decoder classifier（头部不是 LM head）
+
+**Decision**：
+Qwen3.5 微调骨干 + endpoint head 的模型族；每个选项的最后一个 token 与整行最后一个 token 对比打分。
+_Avoid_: Kev（头部与行布局不同）
+
+**Clef**：
+Qwen3.5 骨干 + joint schema head 的模型族；一次前向联合读取 state、schema 与所有选项。
+_Avoid_: Decision（头部不是 endpoint 点积）
+
+**Gated DeltaNet**：
+Qwen3.5 的线性注意力层：depthwise 因果卷积、chunked gated delta rule 与 gated RMSNorm。
+_Avoid_: Mamba、RNN
+
+**LoRA adapter**：
+叠加在基础模型线性层上的低秩增量 `W + α/r · B A`；Kev 在加载时合并，不单独生成新权重文件。
+_Avoid_: Fine-tune、adapter（指整个模型时）
+
 **Laya Router**：
 在 Laya 变体之间按语言或 typed-decisions 工作流签名选择 checkpoint 的组件。
 _Avoid_: Model selector

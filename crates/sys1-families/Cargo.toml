@@ -9,11 +9,37 @@ readme = "README.md"
 
 [dependencies]
 sys1-core = { path = "../sys1-core" }
+sys1-clef = { path = "../sys1-clef" }
+sys1-decima = { path = "../sys1-decima" }
+sys1-decision = { path = "../sys1-decision" }
 sys1-gliclass = { path = "../sys1-gliclass" }
+sys1-kev = { path = "../sys1-kev" }
 sys1-laya = { path = "../sys1-laya" }
 sys1-nli = { path = "../sys1-nli" }
+sys1-qwen3guard = { path = "../sys1-qwen3guard" }
+sys1-von = { path = "../sys1-von" }
 indexmap.workspace = true
 
 [features]
 default = []
 onnx = ["sys1-laya/onnx"]
+cuda = [
+    "sys1-clef/cuda", "sys1-decima/cuda", "sys1-decision/cuda",
+    "sys1-gliclass/cuda", "sys1-kev/cuda", "sys1-laya/cuda",
+    "sys1-nli/cuda", "sys1-qwen3guard/cuda", "sys1-von/cuda",
+]
+cudnn = [
+    "sys1-clef/cudnn", "sys1-decima/cudnn", "sys1-decision/cudnn",
+    "sys1-gliclass/cudnn", "sys1-kev/cudnn", "sys1-laya/cudnn",
+    "sys1-nli/cudnn", "sys1-qwen3guard/cudnn", "sys1-von/cudnn",
+]
+metal = [
+    "sys1-clef/metal", "sys1-decima/metal", "sys1-decision/metal",
+    "sys1-gliclass/metal", "sys1-kev/metal", "sys1-laya/metal",
+    "sys1-nli/metal", "sys1-qwen3guard/metal", "sys1-von/metal",
+]
+accelerate = [
+    "sys1-clef/accelerate", "sys1-decima/accelerate", "sys1-decision/accelerate",
+    "sys1-gliclass/accelerate", "sys1-kev/accelerate", "sys1-laya/accelerate",
+    "sys1-nli/accelerate", "sys1-qwen3guard/accelerate", "sys1-von/accelerate",
+]

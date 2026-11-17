@@ -9,7 +9,8 @@
 
 - 一个可嵌入其他 Rust 项目的**进程内推理接口**，类型安全、与官方 SDK 的数据模型对齐。
 - 一个 `sys1` CLI，运行严格兼容 TypeSafe 官方契约的 HTTP API（`/v1/systemone`、`/v1/models`）。
-- 可替换的 System One 模型族；v1 内置 Laya、NLI、GLiClass，后续可加其他 family/backend。
+- 可替换的 System One 模型族；当前内置 Laya、NLI、GLiClass、Qwen3Guard、
+  Von、Decima、Kev、Decision 与 Clef，后续可加其他 family/backend。
 - 多来源模型获取：本地路径、Hugging Face、ModelScope、自定义静态 HTTP 中心。
 - 单进程加载模型，带模型注册表、懒加载、LRU 与 keep_alive。
 - 编译期 feature 控制加速器与可选组件；运行时自动探测可用设备。
@@ -39,6 +40,13 @@ sys1-modernbert 共享 candle ModernBERT 编码器
 sys1-laya       Laya family：clean-room candle 实现 + 可选 ONNX 导出路径
 sys1-nli         NLI family：ModernBERT zero-shot 交叉编码器
 sys1-gliclass    GLiClass family：ModernBERT uni-encoder（32M edge）
+sys1-qwen        Qwen3 / Qwen3.5 decoder 骨干（candle）
+sys1-qwen3guard  Qwen3Guard Gen 固定预设安全模型
+sys1-von         Von 1.1 option-marker 编码器
+sys1-decima      Decima late-interaction 编码器
+sys1-kev         Kev pointer-head 解码器
+sys1-decision    Decision 1.0 endpoint-head 解码器
+sys1-clef        Clef joint-schema 解码器
       ▲
 sys1-families   目录识别 + 统一 ModelFactory 分发
       ▲
@@ -46,7 +54,7 @@ sys1-server     axum：严格官方 /v1/*、/health、运行时 /api/*、跨请�
       ▲
 sys1-cli        clap 二进制：serve/pull/list/show/rm/run/doctor
       ▲
-sys1            umbrella：InferenceEngine + 进程内 API，默认内置 Laya/NLI/GLiClass + 全部 hub 源
+sys1            umbrella：InferenceEngine + 进程内 API，默认内置全部 candle 模型族 + 全部 hub 源
 ```
 
 依赖方向单向向上；`sys1-core` 不依赖 `sys1-hub`，`sys1-server` 不依赖具体模型族。CLI 负责把 hub、laya、server 组装起来。
@@ -80,8 +88,9 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - `EngineOptions` 分组：`hub`（缓存/端点/凭据）、`registry`（LRU/keep_alive）、
   `model`（`ModelOptions`：device/dtype/max_len/confidence/attention）。
 - `new` 空目录；`from_reference` / `from_directory` 立即注册；`add` / `add_as`
-  通过 hub 物化并注册；Laya 仓库根自动注册 router 与三个变体，NLI/GLiClass
-  目录自动识别；`remove` 卸载并移除。
+  通过 hub 物化并注册；Laya 仓库根自动注册 router 与三个变体，其余 candle
+  模型族（NLI/GLiClass/Qwen3Guard/Von/Decima/Kev/Decision/Clef）按 checkpoint
+  布局自动识别；`remove` 卸载并移除。
 - `predict` 返回 typed `DecisionOutput`；`systemone` 返回官方 `SystemOneResponse`；
   `predict_batch` 调用模型原生 batch；`load` / `unload` 控制常驻。
 - Engine 实现 `ModelResolver`，可直接作为 `sys1-server` 的运行时 resolver。
@@ -171,7 +180,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 | feature | 作用 | 默认 |
 |---|---|---|
 | `laya` | 内置 Laya family | 是（umbrella） |
-| `families` | Laya/NLI/GLiClass 统一识别与分发 | 是（umbrella） |
+| `families` | 全部 candle 模型族统一识别与分发 | 是（umbrella） |
 | `hub-hf` / `hub-modelscope` / `hub-http` | 模型源适配器 | 是 |
 | `server` / `cli` | HTTP 服务 / 二进制 | 否（由 CLI 组合） |
 | `cuda` | candle CUDA | 否 |

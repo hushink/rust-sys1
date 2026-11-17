@@ -332,7 +332,7 @@ impl InferenceEngine {
         };
         if !is_supported_directory(&directory) {
             return Err(ModelError::unsupported(format!(
-                "`{reference}` is not a supported model directory (Laya, NLI, or GLiClass)"
+                "`{reference}` is not a supported model directory (Laya, NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision, or Clef)"
             ))
             .into());
         }
