@@ -1,0 +1,19 @@
+[package]
+name = "sys1-ort"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ONNX Runtime execution layer for rust-sys1 backends"
+readme = "README.md"
+
+[dependencies]
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-17"] }
+thiserror.workspace = true
+
+[features]
+default = []
+cuda = ["ort/cuda"]
+tensorrt = ["ort/tensorrt"]
+directml = ["ort/directml"]
+coreml = ["ort/coreml"]

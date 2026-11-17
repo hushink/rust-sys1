@@ -12,6 +12,7 @@ sys1-core = { path = "../sys1-core" }
 sys1-protocol = { path = "../sys1-protocol" }
 sys1-hub = { path = "../sys1-hub", optional = true }
 sys1-laya = { path = "../sys1-laya", optional = true }
+sys1-ort = { path = "../sys1-ort", optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -21,7 +22,12 @@ tempfile.workspace = true
 default = ["laya", "hub"]
 laya = ["dep:sys1-laya"]
 hub = ["dep:sys1-hub"]
+onnx = ["dep:sys1-ort", "sys1-laya?/onnx"]
 cuda = ["sys1-laya?/cuda"]
 cudnn = ["sys1-laya?/cudnn"]
 metal = ["sys1-laya?/metal"]
 accelerate = ["sys1-laya?/accelerate"]
+ort-cuda = ["onnx", "sys1-laya?/ort-cuda"]
+ort-tensorrt = ["onnx", "sys1-laya?/ort-tensorrt"]
+ort-directml = ["onnx", "sys1-laya?/ort-directml"]
+ort-coreml = ["onnx", "sys1-laya?/ort-coreml"]

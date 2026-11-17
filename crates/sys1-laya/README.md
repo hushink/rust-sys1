@@ -2,7 +2,8 @@
 
 [简体中文](README.zh-CN.md)
 
-Clean-room Laya decision-model implementation in candle.
+Clean-room Laya decision-model implementation in candle, with an optional ONNX
+Runtime backend.
 
 ## Checkpoints
 
@@ -18,6 +19,71 @@ encoder/config.json
 rl_agent_config.json
 tokenizer/tokenizer.json
 ```
+
+## ONNX Runtime backend
+
+Enable the `onnx` feature to run a Laya checkpoint exported to ONNX:
+
+```bash
+cargo build -p sys1-laya --features onnx
+```
+
+An ONNX model directory contains:
+
+```text
+model.onnx                 # or the file named by onnx.json
+rl_agent_config.json
+tokenizer/tokenizer.json   # or tokenizer.json
+onnx.json                  # optional
+```
+
+`LayaOnnxModel::load_dir` shares tokenization, sequence layout, calibration,
+and answer formatting with `LayaModel`; only the graph forward pass differs.
+`LayaFactory` loads manifests with `backend = "onnx"` and `format = "onnx"`,
+and `is_onnx_directory` / `is_model_directory` detect such directories.
+
+### Graph contract
+
+| Input | Type | Shape |
+| --- | --- | --- |
+| `input_ids` | int64 | `[batch, seq]` |
+| `attention_mask` | int64 | `[batch, seq]` |
+| `type_ids` | int64 | `[batch]` |
+| `markers` | int64 | `[n]` |
+
+`markers` holds flattened `row * seq + position` indexes into `input_ids`.
+The graph applies the encoder, type embedding, decision head, marker gather,
+and scorer, then returns one float32 logit per marker as `logits` with shape
+`[n]`. Batch and sequence axes must be dynamic.
+
+`onnx.json` overrides defaults:
+
+```json
+{
+  "model": "model.onnx",
+  "max_batch": 8,
+  "intra_threads": 4,
+  "inter_threads": 1,
+  "input_ids": "input_ids",
+  "attention_mask": "attention_mask",
+  "type_ids": "type_ids",
+  "markers": "markers",
+  "output": "logits"
+}
+```
+
+`max_batch` bounds unique items per ONNX run; larger requests are chunked.
+ONNX Runtime is loaded dynamically at session creation. Set `ORT_DYLIB_PATH`
+to the `onnxruntime` shared library, or put it on the platform loader path.
+Builds never download runtime binaries. The binding targets ONNX Runtime API
+17 and has been verified against 1.17.
+
+Execution-provider features: `ort-cuda`, `ort-tensorrt`, `ort-directml`, and
+`ort-coreml` (each implies `onnx`). TensorRT requires a local TensorRT SDK.
+No official Laya ONNX artifact is published yet; use an exporter that follows
+the contract above. The repository tests use a synthetic graph to verify
+batching, padding, marker indexing, and factory wiring, not numerical parity
+with the candle checkpoint.
 
 ## Example
 
@@ -83,7 +149,9 @@ name keeps the first registration — unregister first to replace it.
 Checkpoint layout knowledge lives here so composition layers do not have to
 define Laya-prefixed APIs:
 
-- `is_checkpoint_directory` / `has_checkpoint_variants`
+- `is_checkpoint_directory` — candle safetensors checkpoint layout
+- `is_onnx_directory` / `is_model_directory` — ONNX export layout, or either backend
+- `has_checkpoint_variants`
 - `variant_directories` — the three catalog names and paths of a repository root
 - `local_checkpoint_manifest` — manifest plus file map for a bare checkpoint
   directory without `model.json`
@@ -132,7 +200,9 @@ model-level table; `LayaOptions::local_window = false` (or CLI
 
 ## Features
 
-`cuda`, `cudnn`, `metal`, `accelerate` forward to candle.
+`onnx` enables ONNX Runtime and `LayaOnnxModel`. `cuda`, `cudnn`, `metal`, and
+`accelerate` forward to candle. `ort-cuda`, `ort-tensorrt`, `ort-directml`, and
+`ort-coreml` enable ONNX Runtime execution providers.
 
 FlashAttention is not enabled: a prototype was ~2.6x faster on a 932-token
 state but changed the decision outputs, and the upstream kernel build failed

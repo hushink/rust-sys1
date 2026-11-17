@@ -27,7 +27,7 @@ use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
     ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory as CheckpointFactory,
     LayaModel as CheckpointModel, LayaOptions as ModelOptions, has_checkpoint_variants,
-    is_checkpoint_directory, local_checkpoint_manifest, register_checkpoint_bundle, set_tf32,
+    is_model_directory, local_checkpoint_manifest, register_checkpoint_bundle, set_tf32,
 };
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{
@@ -501,6 +501,15 @@ fn doctor_command(
     println!("  cudnn: {}", cfg!(feature = "cudnn"));
     println!("  metal: {}", cfg!(feature = "metal"));
     println!("  accelerate: {}", cfg!(feature = "accelerate"));
+    println!("  onnx: {}", cfg!(feature = "onnx"));
+    println!("  ort-cuda: {}", cfg!(feature = "ort-cuda"));
+    println!("  ort-tensorrt: {}", cfg!(feature = "ort-tensorrt"));
+    println!("  ort-directml: {}", cfg!(feature = "ort-directml"));
+    println!("  ort-coreml: {}", cfg!(feature = "ort-coreml"));
+    println!(
+        "  ORT_DYLIB_PATH: {}",
+        std::env::var("ORT_DYLIB_PATH").unwrap_or_else(|_| "(loader default)".to_owned())
+    );
     println!("  device: {device:?}");
     println!("  dtype: {dtype:?}");
     println!(
@@ -660,7 +669,7 @@ fn build_models(
 
     if specs.is_empty() {
         for pulled in hub.list_cached()? {
-            if !is_checkpoint_directory(&pulled.directory) {
+            if !is_model_directory(&pulled.directory) {
                 continue;
             }
             let registered = register_checkpoint_bundle(
@@ -680,8 +689,8 @@ fn build_models(
     for spec in specs {
         let (name, reference) = parse_model_spec(spec)?;
         let pulled = pull_model(hub, &reference)?;
-        if !is_checkpoint_directory(&pulled.directory) {
-            bail!("{reference} does not look like a Laya safetensors checkpoint");
+        if !is_model_directory(&pulled.directory) {
+            bail!("{reference} does not look like a Laya checkpoint (safetensors or ONNX)");
         }
         if name == "laya-latest" && !has_checkpoint_variants(&pulled.directory) {
             tracing::warn!(

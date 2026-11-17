@@ -33,8 +33,13 @@ reqwest.workspace = true
 tempfile.workspace = true
 
 [features]
-default = []
+default = ["onnx"]
+onnx = ["sys1-laya/onnx"]
 cuda = ["sys1-laya/cuda", "candle-core/cuda"]
 cudnn = ["cuda", "sys1-laya/cudnn"]
 metal = ["sys1-laya/metal", "candle-core/metal"]
 accelerate = ["sys1-laya/accelerate", "candle-core/accelerate"]
+ort-cuda = ["onnx", "sys1-laya/ort-cuda"]
+ort-tensorrt = ["onnx", "sys1-laya/ort-tensorrt"]
+ort-directml = ["onnx", "sys1-laya/ort-directml"]
+ort-coreml = ["onnx", "sys1-laya/ort-coreml"]

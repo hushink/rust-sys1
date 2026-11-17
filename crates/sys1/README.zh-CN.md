@@ -11,8 +11,10 @@ rust-sys1 进程内 API 的 umbrella crate。
 sys1 = { path = "../sys1" }
 ```
 
-默认 feature：`laya`、`hub`。可选加速 feature：`cuda`、`cudnn`、`metal`、
-`accelerate`。`InferenceEngine` 需要同时启用 `laya` 与 `hub`（即默认集合）。
+默认 feature：`laya`、`hub`。可选后端/加速 feature：`onnx`、`cuda`、`cudnn`、
+`metal`、`accelerate`，以及 ONNX Runtime 执行提供器 `ort-cuda`、`ort-tensorrt`、
+`ort-directml`、`ort-coreml`。`InferenceEngine` 需要同时启用 `laya` 与 `hub`
+（即默认集合）。
 
 ## 示例
 
@@ -53,6 +55,28 @@ let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+启用 `features = ["onnx"]` 后，可直接加载 ONNX 导出，也可通过
+`InferenceEngine::from_directory` 使用：
+
+```rust
+use std::path::Path;
+use sys1::{DecisionModel, LayaOnnxModel, LayaOptions, Questions, State};
+
+let model = LayaOnnxModel::load_dir(
+    Path::new("/path/to/laya-onnx"),
+    LayaOptions::default(),
+)?;
+let output = model.predict(
+    &State::text("I was charged twice."),
+    &Questions::new().noul("billing", "Is this about billing?"),
+)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+计算图契约与 `onnx.json` 选项见
+[`sys1-laya`](../sys1-laya/README.zh-CN.md#onnx-runtime-后端)。`sys1::ort`
+重新导出底层 `ScoringSession`，供其他模型 family 复用。
+
 ## 进程内引擎
 
 - `EngineOptions` 按 `hub`（缓存、端点、凭据）、`registry`（LRU/keep-alive）与
@@ -76,11 +100,12 @@ let billing = output.answers.noul("billing")?;
 - `sys1::protocol` — `sys1-protocol` 全部
 - `sys1::hub` — `sys1-hub` 全部（feature `hub`）
 - `sys1::laya` — `sys1-laya` 全部（feature `laya`）
+- `sys1::ort` — ONNX Runtime session 层（feature `onnx`）
 - 扁平别名：`DecisionModel`、`ModelResolver`、`ModelRegistry`、`ModelManifest`、
   `Questions`、`Answers`、`State`、`Question`、`Answer`、`EngineOptions`、
   `EngineError`、`InferenceEngine`、`ModelOptions`、`ModelOrigin`、
   `ConfidenceMode`、`LayaModel`、`LayaOptions`、`LayaFactory`、`LayaRouter`、
-  `Hub`、`HubConfig`。
+  `LayaOnnxModel`（feature `onnx`）、`Hub`、`HubConfig`。
 
 Engine 是增量能力：原有的 `LayaModel` / `LayaOptions` 直接 API 继续可用，
 Laya 类型也可通过 `sys1::laya` 访问。

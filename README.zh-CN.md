@@ -14,6 +14,7 @@
 - 进程内推理：typed `Questions` / `Answers`，不经过 HTTP 与序列化。
 - `InferenceEngine`：一个对象串起 hub、manifest、后端 factory、注册表与 typed 推理。
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
+- 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
 - 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁。
 - 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理。
@@ -28,7 +29,8 @@
 | [`sys1-protocol`](crates/sys1-protocol/README.zh-CN.md) | 官方 wire types、校验、typed questions/answers |
 | [`sys1-core`](crates/sys1-core/README.zh-CN.md) | `DecisionModel`、注册表、manifest、进程内 API、设备选择 |
 | [`sys1-hub`](crates/sys1-hub/README.zh-CN.md) | 模型源与缓存（Local / HF / ModelScope / HTTP） |
-| [`sys1-laya`](crates/sys1-laya/README.zh-CN.md) | clean-room Laya 实现与 Router |
+| [`sys1-laya`](crates/sys1-laya/README.zh-CN.md) | clean-room Laya 实现、Router、ONNX 导出路径 |
+| [`sys1-ort`](crates/sys1-ort/README.zh-CN.md) | 动态加载的 ONNX Runtime session 与 token-scoring 层 |
 | [`sys1-server`](crates/sys1-server/README.zh-CN.md) | axum `/v1/*` 与 `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.zh-CN.md) | `sys1` 二进制：serve/pull/list/show/rm/run/doctor |
 | [`sys1`](crates/sys1/README.zh-CN.md) | umbrella 进程内引擎 API |
@@ -49,7 +51,12 @@ cargo build --release -p sys1-cli
 cargo build --release -p sys1-cli --features cuda
 cargo build --release -p sys1-cli --features cudnn
 cargo build --release -p sys1-cli --features metal   # macOS
+cargo build --release -p sys1-cli --features ort-cuda
+cargo build --release -p sys1-cli --features ort-tensorrt
 ```
+
+ONNX 支持是 CLI 默认 feature。ONNX Runtime 在加载模型时动态加载：设置
+`ORT_DYLIB_PATH`，或将 `onnxruntime` 安装到平台加载路径。构建期不会下载运行时二进制。
 
 ### Laya 目录结构
 
@@ -59,6 +66,10 @@ encoder/config.json
 rl_agent_config.json
 tokenizer/tokenizer.json
 ```
+
+ONNX 导出则提供 `model.onnx`（或 `onnx.json` 指定的文件）、`rl_agent_config.json`
+与 tokenizer。计算图契约见
+[`sys1-laya` ONNX 后端](crates/sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
 
 ### 启动服务
 
@@ -484,6 +495,12 @@ pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
 
 ```bash
 cargo test --offline --workspace
+
+# 要求运行 ORT 后端测试（缺少 dylib 时默认跳过）
+$env:ORT_DYLIB_PATH="C:/path/to/onnxruntime.dll"
+$env:SYS1_REQUIRE_ORT="1"
+cargo test --offline -p sys1-ort
+cargo test --offline -p sys1-laya --features onnx
 ```
 
 Hub 测试会启动本地回环模型中心，覆盖静态 manifest、Bearer token、Range
@@ -507,8 +524,9 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 ## 已知缺口 / Roadmap
 
 - zstd 请求压缩。
-- ONNX Runtime / TensorRT Execution Provider（v1.1）。candle 无法直接承载 TensorRT；
-  ORT TensorRT EP 是计划路径。
+- 真实的 Laya ONNX 导出产物。可选 ORT 后端、动态加载、合成契约测试与 factory 接线已实现；
+  官方尚未发布 ONNX 产物。TensorRT 仍只能通过 ORT TensorRT EP 使用。
+- TensorRT EP 的 CI 需要安装了 TensorRT 的 self-hosted GPU runner。
 - long context 扫描、act head、abstention、parallel option layout（v1.1）。
 - 长上下文 FlashAttention：用 hdim64-only candle-flash-attn + CUDA 13.3 的原型
   把 932 token 延迟从 ~181 ms 降到 ~69 ms，但答案与 eager/F32 不一致；上游完整

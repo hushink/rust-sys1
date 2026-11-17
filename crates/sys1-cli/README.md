@@ -29,6 +29,23 @@ A local Laya directory without `model.json` is accepted directly:
 sys1 run local:/path/to/laya-multilingual --input request.json
 ```
 
+## ONNX models
+
+The CLI enables the `onnx` feature by default. A directory containing
+`model.onnx` (or an `onnx.json` sidecar naming another file),
+`rl_agent_config.json`, and a tokenizer is detected as an ONNX Laya export:
+
+```bash
+sys1 serve --model laya-onnx=local:/path/to/laya-onnx
+```
+
+ONNX Runtime is loaded dynamically at model load time. Set `ORT_DYLIB_PATH` to
+the `onnxruntime` shared library, or install it on the platform loader path.
+The graph input/output contract and the optional `onnx.json` fields are
+documented in [`sys1-laya`](../sys1-laya/README.md#onnx-runtime-backend).
+The CLI `pull`/`show` paths also accept ONNX manifests
+(`backend = "onnx"`, `format = "onnx"`).
+
 ## Serve
 
 ```bash
@@ -212,9 +229,15 @@ reported as `dropped`.
 cargo build --release -p sys1-cli --features cuda
 cargo build --release -p sys1-cli --features cudnn
 cargo build --release -p sys1-cli --features metal
+cargo build --release -p sys1-cli --features ort-cuda
+cargo build --release -p sys1-cli --features ort-tensorrt
 ```
 
-`sys1 doctor` prints compiled features and the resolved device.
+`onnx` is in the default features. Disable it with
+`--no-default-features` when ONNX Runtime should not be part of the binary.
+`ort-cuda`, `ort-tensorrt`, `ort-directml`, and `ort-coreml` enable ONNX
+Runtime execution providers and require the matching SDK/runtime. `sys1 doctor`
+prints compiled features and the resolved device.
 
 ## Request file
 

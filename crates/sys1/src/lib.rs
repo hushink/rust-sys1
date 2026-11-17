@@ -55,3 +55,11 @@ pub use sys1_hub::{Hub, HubConfig, ModelRef, ModelSource, PulledModel};
 
 #[cfg(feature = "laya")]
 pub use sys1_laya::{ConfidenceMode, LayaFactory, LayaModel, LayaOptions, LayaRouter};
+
+#[cfg(all(feature = "laya", feature = "onnx"))]
+pub use sys1_laya::LayaOnnxModel;
+
+#[cfg(feature = "onnx")]
+pub mod ort {
+    pub use sys1_ort::*;
+}

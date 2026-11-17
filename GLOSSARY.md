@@ -125,3 +125,15 @@ _Avoid_: Cache（磁盘缓存）、loaded（口语）
 **Inference backend（推理后端）**：
 执行模型前向计算的引擎，如 candle、ONNX Runtime。
 _Avoid_: Model、engine（作为整体系统时）
+
+**Execution provider（执行提供器）**：
+ONNX Runtime 内部实际执行算子图的设备后端，如 CPU、CUDA、TensorRT、DirectML、CoreML；由 Cargo feature 启用。
+_Avoid_: Backend（与 candle/ORT 这一层混淆）
+
+**Scoring contract（打分契约）**：
+模型 family 与 ONNX Runtime 之间的前向接口：`input_ids`、`attention_mask`、`type_ids`、`markers` 输入，逐 marker 的 float32 logits 输出。
+_Avoid_: ONNX API、tokenizer contract
+
+**ONNX export（ONNX 导出）**：
+与某个 checkpoint 共用 tokenizer、`rl_agent_config.json` 和答案语义，但以前向计算图（`model.onnx`）替代 safetensors 权重的模型目录。
+_Avoid_: ONNX checkpoint（易与 safetensors checkpoint 混淆，但可接受）

@@ -2,6 +2,7 @@ use crate::calibration::TYPES;
 use crate::config::LayaConfig;
 use crate::tokenizer::LayaTokenizer;
 use serde_json::Value;
+use std::collections::HashMap;
 use sys1_core::{ModelError, Questions};
 use sys1_protocol::{Content, NoulCriteria, Question, State};
 
@@ -271,6 +272,50 @@ fn content_to_value(content: &Content) -> Value {
     }
 }
 
+struct ItemKey<'a> {
+    kind: usize,
+    ids: &'a [u32],
+    markers: &'a [usize],
+}
+
+impl PartialEq for ItemKey<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.ids == other.ids && self.markers == other.markers
+    }
+}
+
+impl Eq for ItemKey<'_> {}
+
+impl std::hash::Hash for ItemKey<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.kind.hash(state);
+        self.ids.hash(state);
+        self.markers.hash(state);
+    }
+}
+
+/// Collapse identical token sequences before a forward pass. Returns the
+/// unique items in first-seen order and one index per input item.
+pub(crate) fn deduplicate<'a>(items: &[&'a Item]) -> (Vec<&'a Item>, Vec<usize>) {
+    let mut unique = Vec::with_capacity(items.len());
+    let mut indices = Vec::with_capacity(items.len());
+    let mut seen: HashMap<ItemKey<'a>, usize> = HashMap::with_capacity(items.len());
+    for item in items {
+        let key = ItemKey {
+            kind: item.question.kind,
+            ids: &item.ids,
+            markers: &item.markers,
+        };
+        let index = *seen.entry(key).or_insert_with(|| {
+            let index = unique.len();
+            unique.push(*item);
+            index
+        });
+        indices.push(index);
+    }
+    (unique, indices)
+}
+
 fn render_json(value: &Value) -> String {
     match value {
         Value::Array(values) => format!(
@@ -379,5 +424,30 @@ mod tests {
     #[test]
     fn sanitizes_mask_tokens() {
         assert_eq!(sanitize_masks("a [MASK] b <mask> c"), "a   b   c");
+    }
+
+    #[test]
+    fn deduplicates_identical_inputs_without_losing_order() {
+        let make = |id: &str, kind: usize, ids: &[u32]| Item {
+            question: PreparedQuestion {
+                id: id.to_owned(),
+                kind,
+                instructions: String::new(),
+                criteria: Criteria::Noul,
+                labels: Vec::new(),
+                options: Vec::new(),
+            },
+            ids: ids.to_vec(),
+            markers: vec![1],
+        };
+        let first = make("first", 0, &[1, 2, 3]);
+        let duplicate = make("duplicate", 0, &[1, 2, 3]);
+        let other_kind = make("other-kind", 1, &[1, 2, 3]);
+        let items = vec![&first, &duplicate, &other_kind, &first];
+
+        let (unique, indices) = deduplicate(&items);
+
+        assert_eq!(unique.len(), 2);
+        assert_eq!(indices, vec![0, 0, 1, 0]);
     }
 }

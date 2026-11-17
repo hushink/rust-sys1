@@ -1,15 +1,14 @@
-use crate::calibration::{ConfidenceMode, argmax, confidence, probability, round4};
+use crate::calibration::ConfidenceMode;
 use crate::config::{LayaConfig, ModernBertConfig};
 use crate::modernbert::Encoder;
-use crate::prepare::{Criteria, Item, PreparedRequest, prepare_request};
+use crate::prepare::{Item, PreparedRequest, deduplicate, prepare_request};
+use crate::response::build_response;
 use crate::tokenizer::LayaTokenizer;
 use candle_core::{D, DType, Device, IndexOp, Tensor};
 use candle_nn::{Embedding, LayerNorm, Linear, VarBuilder, embedding, layer_norm};
-use indexmap::IndexMap;
-use std::collections::HashMap;
 use std::path::Path;
-use sys1_core::{Answers, DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
-use sys1_protocol::{Answer, ChoiceAnswer, NoulAnswer, ScoreAnswer, State, Usage};
+use sys1_core::{DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
+use sys1_protocol::State;
 
 /// Runtime options for a Laya checkpoint.
 #[derive(Clone)]
@@ -408,69 +407,6 @@ impl LayaModel {
             .to_vec1::<f32>()
             .map_err(inference_error)
     }
-
-    fn response(
-        &self,
-        request: PreparedRequest,
-        logits: &mut impl Iterator<Item = Vec<f32>>,
-    ) -> DecisionOutput {
-        let input_tokens = request.items.iter().map(|item| item.ids.len() as u64).sum();
-        let mut answers: IndexMap<String, Answer> = IndexMap::with_capacity(request.items.len());
-
-        for item in request.items {
-            let values = logits.next().expect("one logits vector per item");
-            let temperature = self
-                .config
-                .temperature_for(item.question.kind, values.len());
-            let probabilities = probability(&values, temperature);
-            let conf = confidence(self.confidence_mode, &probabilities);
-
-            let answer = match item.question.kind {
-                0 => {
-                    let index = argmax(&probabilities);
-                    let mut distribution = IndexMap::with_capacity(probabilities.len());
-                    for (label, value) in item.question.labels.iter().zip(probabilities.iter()) {
-                        distribution.insert(label.clone(), round4(*value as f64));
-                    }
-                    Answer::Choice(ChoiceAnswer::new(
-                        item.question.labels[index].clone(),
-                        round4(conf),
-                        distribution,
-                    ))
-                }
-                1 => {
-                    let score: f32 = probabilities
-                        .iter()
-                        .enumerate()
-                        .map(|(index, value)| index as f32 * value)
-                        .sum();
-                    let mut distribution = IndexMap::with_capacity(probabilities.len());
-                    let mut legend = IndexMap::with_capacity(probabilities.len());
-                    for (index, value) in probabilities.iter().enumerate() {
-                        distribution.insert(index.to_string(), round4(*value as f64));
-                        if let Criteria::Score(criteria) = &item.question.criteria
-                            && let Some(content) = criteria.get(index)
-                        {
-                            legend.insert(index.to_string(), content.clone());
-                        }
-                    }
-                    Answer::Score(ScoreAnswer::new(
-                        round4(score as f64),
-                        round4(conf),
-                        legend,
-                        distribution,
-                    ))
-                }
-                _ => {
-                    let true_probability = probabilities.get(1).copied().unwrap_or(0.0);
-                    Answer::Noul(NoulAnswer::new(round4(true_probability as f64)))
-                }
-            };
-            answers.insert(item.question.id, answer);
-        }
-
-        DecisionOutput::new(Answers::new(answers), Usage::new(input_tokens, 0))
-    }
 }
 
 impl DecisionModel for LayaModel {
@@ -516,7 +452,12 @@ impl DecisionModel for LayaModel {
                 Ok(outputs) => {
                     let mut outputs = outputs.into_iter();
                     for (request, slot) in prepared.into_iter().zip(prepared_slots) {
-                        slots[slot] = Some(Ok(self.response(request, &mut outputs)));
+                        slots[slot] = Some(Ok(build_response(
+                            &self.config,
+                            self.confidence_mode,
+                            request,
+                            &mut outputs,
+                        )));
                     }
                 }
                 Err(error) => {
@@ -548,48 +489,6 @@ fn linear_dtype(
 
 fn inference_error(error: candle_core::Error) -> ModelError {
     ModelError::inference(error.to_string())
-}
-
-struct ItemKey<'a> {
-    kind: usize,
-    ids: &'a [u32],
-    markers: &'a [usize],
-}
-
-impl PartialEq for ItemKey<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind && self.ids == other.ids && self.markers == other.markers
-    }
-}
-
-impl Eq for ItemKey<'_> {}
-
-impl std::hash::Hash for ItemKey<'_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.kind.hash(state);
-        self.ids.hash(state);
-        self.markers.hash(state);
-    }
-}
-
-fn deduplicate<'a>(items: &[&'a Item]) -> (Vec<&'a Item>, Vec<usize>) {
-    let mut unique = Vec::with_capacity(items.len());
-    let mut indices = Vec::with_capacity(items.len());
-    let mut seen: HashMap<ItemKey<'a>, usize> = HashMap::with_capacity(items.len());
-    for item in items {
-        let key = ItemKey {
-            kind: item.question.kind,
-            ids: &item.ids,
-            markers: &item.markers,
-        };
-        let index = *seen.entry(key).or_insert_with(|| {
-            let index = unique.len();
-            unique.push(*item);
-            index
-        });
-        indices.push(index);
-    }
-    (unique, indices)
 }
 
 #[cfg(test)]
@@ -657,31 +556,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn deduplicates_identical_inputs_without_losing_order() {
-        let make = |id: &str, kind: usize, ids: &[u32]| Item {
-            question: crate::prepare::PreparedQuestion {
-                id: id.to_owned(),
-                kind,
-                instructions: String::new(),
-                criteria: Criteria::Noul,
-                labels: Vec::new(),
-                options: Vec::new(),
-            },
-            ids: ids.to_vec(),
-            markers: vec![1],
-        };
-        let first = make("first", 0, &[1, 2, 3]);
-        let duplicate = make("duplicate", 0, &[1, 2, 3]);
-        let other_kind = make("other-kind", 1, &[1, 2, 3]);
-        let items = vec![&first, &duplicate, &other_kind, &first];
-
-        let (unique, indices) = deduplicate(&items);
-
-        assert_eq!(unique.len(), 2);
-        assert_eq!(indices, vec![0, 0, 1, 0]);
     }
 
     #[test]

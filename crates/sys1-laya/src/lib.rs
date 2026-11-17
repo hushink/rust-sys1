@@ -11,17 +11,23 @@ mod config;
 mod factory;
 mod model;
 mod modernbert;
+#[cfg(feature = "onnx")]
+mod onnx;
+mod onnx_config;
 mod prepare;
+mod response;
 mod router;
 mod tokenizer;
 
 pub use bundle::{
-    has_checkpoint_variants, is_checkpoint_directory, local_checkpoint_manifest,
-    register_checkpoint_bundle, variant_directories,
+    has_checkpoint_variants, is_checkpoint_directory, is_model_directory, is_onnx_directory,
+    local_checkpoint_manifest, register_checkpoint_bundle, variant_directories,
 };
 pub use calibration::ConfidenceMode;
 pub use factory::LayaFactory;
 pub use model::{LayaModel, LayaOptions};
+#[cfg(feature = "onnx")]
+pub use onnx::LayaOnnxModel;
 pub use router::LayaRouter;
 
 /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.

@@ -29,6 +29,20 @@
 sys1 run local:/path/to/laya-multilingual --input request.json
 ```
 
+## ONNX 模型
+
+CLI 默认启用 `onnx` feature。包含 `model.onnx`（或由 `onnx.json` 指定其他文件）、
+`rl_agent_config.json` 与 tokenizer 的目录会被识别为 Laya ONNX 导出：
+
+```bash
+sys1 serve --model laya-onnx=local:/path/to/laya-onnx
+```
+
+ONNX Runtime 在加载模型时动态加载。设置 `ORT_DYLIB_PATH` 指向 `onnxruntime`
+共享库，或将其安装到平台加载路径。计算图输入/输出契约与可选 `onnx.json`
+字段见 [`sys1-laya`](../sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
+CLI 的 `pull`/`show` 也接受 ONNX manifest（`backend = "onnx"`、`format = "onnx"`）。
+
 ## 启动服务
 
 ```bash
@@ -198,8 +212,13 @@ in-flight permit 的请求计入 `dropped`。
 cargo build --release -p sys1-cli --features cuda
 cargo build --release -p sys1-cli --features cudnn
 cargo build --release -p sys1-cli --features metal
+cargo build --release -p sys1-cli --features ort-cuda
+cargo build --release -p sys1-cli --features ort-tensorrt
 ```
 
+`onnx` 属于默认 features。若二进制不需要 ONNX Runtime，可用
+`--no-default-features` 关闭。`ort-cuda`、`ort-tensorrt`、`ort-directml`、
+`ort-coreml` 启用 ONNX Runtime 执行提供器，需要对应的 SDK/运行时。
 `sys1 doctor` 输出编译 feature 与解析后的设备。
 
 ## 请求文件

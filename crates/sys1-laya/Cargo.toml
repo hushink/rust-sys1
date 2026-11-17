@@ -10,6 +10,7 @@ readme = "README.md"
 [dependencies]
 sys1-core = { path = "../sys1-core" }
 sys1-protocol = { path = "../sys1-protocol" }
+sys1-ort = { path = "../sys1-ort", optional = true }
 candle-core = { version = "0.11", default-features = false }
 candle-nn = { version = "0.11", default-features = false }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
@@ -19,9 +20,17 @@ thiserror.workspace = true
 indexmap.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [features]
 default = []
+onnx = ["dep:sys1-ort"]
 cuda = ["candle-core/cuda", "candle-nn/cuda"]
 cudnn = ["cuda", "candle-core/cudnn", "candle-nn/cudnn"]
 metal = ["candle-core/metal", "candle-nn/metal"]
 accelerate = ["candle-core/accelerate", "candle-nn/accelerate"]
+ort-cuda = ["onnx", "sys1-ort/cuda"]
+ort-tensorrt = ["onnx", "sys1-ort/tensorrt"]
+ort-directml = ["onnx", "sys1-ort/directml"]
+ort-coreml = ["onnx", "sys1-ort/coreml"]

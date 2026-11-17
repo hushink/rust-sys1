@@ -11,9 +11,10 @@ and provides `InferenceEngine`, which wires all core components together.
 sys1 = { path = "../sys1" }
 ```
 
-Default features: `laya`, `hub`. Optional accelerator features: `cuda`, `cudnn`,
-`metal`, `accelerate`. `InferenceEngine` requires both `laya` and `hub` (the
-default set).
+Default features: `laya`, `hub`. Optional backend/accelerator features: `onnx`,
+`cuda`, `cudnn`, `metal`, `accelerate`, and the ONNX Runtime execution
+providers `ort-cuda`, `ort-tensorrt`, `ort-directml`, `ort-coreml`.
+`InferenceEngine` requires both `laya` and `hub` (the default set).
 
 ## Example
 
@@ -55,6 +56,28 @@ let billing = output.answers.noul("billing")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+With `features = ["onnx"]`, an ONNX export can be loaded directly or through
+`InferenceEngine::from_directory`:
+
+```rust
+use std::path::Path;
+use sys1::{DecisionModel, LayaOnnxModel, LayaOptions, Questions, State};
+
+let model = LayaOnnxModel::load_dir(
+    Path::new("/path/to/laya-onnx"),
+    LayaOptions::default(),
+)?;
+let output = model.predict(
+    &State::text("I was charged twice."),
+    &Questions::new().noul("billing", "Is this about billing?"),
+)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+See [`sys1-laya`](../sys1-laya/README.md#onnx-runtime-backend) for the graph
+contract and `onnx.json` options. `sys1::ort` re-exports the raw
+`ScoringSession` layer for other model families.
+
 ## In-process engine
 
 - `EngineOptions` groups `hub` (cache, endpoints, credentials), `registry`
@@ -81,11 +104,12 @@ Lower-level access is still available through `sys1::core`, `sys1::protocol`,
 - `sys1::protocol` — all of `sys1-protocol`
 - `sys1::hub` — all of `sys1-hub` (feature `hub`)
 - `sys1::laya` — all of `sys1-laya` (feature `laya`)
+- `sys1::ort` — ONNX Runtime session layer (feature `onnx`)
 - Flat aliases: `DecisionModel`, `ModelResolver`, `ModelRegistry`,
   `ModelManifest`, `Questions`, `Answers`, `State`, `Question`, `Answer`,
   `EngineOptions`, `EngineError`, `InferenceEngine`, `ModelOptions`,
   `ModelOrigin`, `ConfidenceMode`, `LayaModel`, `LayaOptions`, `LayaFactory`,
-  `LayaRouter`, `Hub`, `HubConfig`.
+  `LayaRouter`, `LayaOnnxModel` (feature `onnx`), `Hub`, `HubConfig`.
 
 The engine is additive: the existing `LayaModel` / `LayaOptions` direct API
 keeps working, and Laya types are also available under `sys1::laya`.

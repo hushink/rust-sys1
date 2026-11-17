@@ -14,6 +14,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - Process-in inference: typed `Questions` / `Answers`, no HTTP or serialization required.
 - `InferenceEngine`: one object wires the hub, manifest, backend factory, registry, and typed inference.
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
+- Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
 - Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock.
 - Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference.
@@ -28,7 +29,8 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 | [`sys1-protocol`](crates/sys1-protocol/README.md) | Official wire types, validation, typed questions/answers |
 | [`sys1-core`](crates/sys1-core/README.md) | `DecisionModel`, registry, manifest, typed in-process API, device selection |
 | [`sys1-hub`](crates/sys1-hub/README.md) | Model sources and cache (Local / HF / ModelScope / HTTP) |
-| [`sys1-laya`](crates/sys1-laya/README.md) | Clean-room Laya implementation and router |
+| [`sys1-laya`](crates/sys1-laya/README.md) | Clean-room Laya implementation, router, ONNX export path |
+| [`sys1-ort`](crates/sys1-ort/README.md) | Dynamically loaded ONNX Runtime session and token-scoring layer |
 | [`sys1-server`](crates/sys1-server/README.md) | Axum server for `/v1/*` and `/health` |
 | [`sys1-cli`](crates/sys1-cli/README.md) | `sys1` binary: serve/pull/list/show/rm/run/doctor |
 | [`sys1`](crates/sys1/README.md) | Umbrella in-process engine API |
@@ -49,7 +51,13 @@ CPU is the default. CUDA / cuDNN / Metal builds:
 cargo build --release -p sys1-cli --features cuda
 cargo build --release -p sys1-cli --features cudnn
 cargo build --release -p sys1-cli --features metal   # macOS
+cargo build --release -p sys1-cli --features ort-cuda
+cargo build --release -p sys1-cli --features ort-tensorrt
 ```
+
+ONNX support is a default CLI feature. ONNX Runtime is loaded dynamically at
+model load time; set `ORT_DYLIB_PATH` or install `onnxruntime` on the platform
+loader path. Builds do not download runtime binaries.
 
 ### Laya checkpoint layout
 
@@ -59,6 +67,10 @@ encoder/config.json
 rl_agent_config.json
 tokenizer/tokenizer.json
 ```
+
+An ONNX export instead provides `model.onnx` (or the file named by
+`onnx.json`), `rl_agent_config.json`, and a tokenizer. See the
+[`sys1-laya` ONNX contract](crates/sys1-laya/README.md#onnx-runtime-backend).
 
 ### Serve
 
@@ -519,6 +531,12 @@ pwsh ./scripts/bench.ps1 -Exe target-cuda/release/sys1.exe `
 
 ```bash
 cargo test --offline --workspace
+
+# Require the ONNX Runtime-backed tests instead of skipping when the dylib is absent
+$env:ORT_DYLIB_PATH="C:/path/to/onnxruntime.dll"
+$env:SYS1_REQUIRE_ORT="1"
+cargo test --offline -p sys1-ort
+cargo test --offline -p sys1-laya --features onnx
 ```
 
 Hub tests spin up loopback model centers and cover static HTTP manifests,
@@ -544,8 +562,10 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 ## Known gaps / roadmap
 
 - zstd request compression.
-- ONNX Runtime / TensorRT Execution Provider (v1.1). TensorRT is not achievable
-  through candle; ORT TensorRT EP is the planned path.
+- A real Laya ONNX export. The optional ORT backend, dynamic loading, synthetic
+  contract tests, and factory wiring are implemented; no official ONNX artifact
+  is published. TensorRT remains available only through the ORT TensorRT EP.
+- TensorRT EP CI requires a self-hosted GPU runner with TensorRT installed.
 - Long-context scanning, act head, abstention, parallel option layout (v1.1).
 - FlashAttention for long contexts: a prototype built with a hdim64-only
   candle-flash-attn + CUDA 13.3 and ran at ~69 ms vs ~181 ms for a 932-token

@@ -7,7 +7,7 @@ use sys1_core::{
 };
 use sys1_hub::{Hub, HubConfig, HubError, ModelRef};
 use sys1_laya::{
-    LayaFactory as CheckpointFactory, is_checkpoint_directory, local_checkpoint_manifest,
+    LayaFactory as CheckpointFactory, is_model_directory, local_checkpoint_manifest,
     register_checkpoint_bundle,
 };
 use sys1_protocol::{ModelMetadata, State, SystemOneResponse};
@@ -272,9 +272,9 @@ impl InferenceEngine {
             let pulled = self.hub.pull(reference)?;
             (pulled.manifest, pulled.directory)
         };
-        if !is_checkpoint_directory(&directory) {
+        if !is_model_directory(&directory) {
             return Err(ModelError::unsupported(format!(
-                "`{reference}` is not a Laya checkpoint directory"
+                "`{reference}` is not a Laya checkpoint directory (safetensors or ONNX)"
             ))
             .into());
         }

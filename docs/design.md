@@ -20,7 +20,7 @@
 - 不做 per-model runner 子进程、MCP、动态插件 ABI。
 - 不发布 crates.io；先内部库 + 二进制。
 - 不做 long context 扫描、act head、abstention、parallel option layout（v1.1）。
-- 不做 ONNX/TensorRT（v1.1，通过可选 ORT backend）。
+- v1 不强制 ONNX/TensorRT；ONNX 作为可选 `sys1-ort` + `sys1-laya/onnx` 路径实现，TensorRT 通过 ORT TensorRT EP。
 - 与 `candle-backend` / `candle-laya` / `jev-sdk-rs` 无代码或依赖关联。
 
 ## 2. 架构
@@ -32,7 +32,9 @@ sys1-core       DecisionModel trait、模型注册表、错误、设备/后端�
       ▲
 sys1-hub        ModelSource / ModelCache：Local、HF、ModelScope、HTTP
       ▲
-sys1-laya       Laya family 的 candle 实现（clean-room）
+sys1-ort        动态加载的 ONNX Runtime session 与 token-scoring 契约
+      ▲
+sys1-laya       Laya family：clean-room candle 实现 + 可选 ONNX 导出路径
       ▲
 sys1-server     axum：严格官方 /v1/*、/health、运行时 /api/*、跨请求 batching、错误映射
       ▲
@@ -170,7 +172,8 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 | `accelerate` | CPU BLAS 加速 | 否 |
 | `mkl` | CPU BLAS 加速（预留；当前离线依赖不可用） | 否 |
 | `nvml` | CUDA 显卡空闲显存探测 | 否 |
-| `onnx` / `ort-cuda` / `ort-tensorrt` / `ort-directml` / `ort-coreml` | 未来 ORT backend | 否 |
+| `onnx` | ONNX Runtime backend（`sys1-ort` + `LayaOnnxModel`） | CLI 是；umbrella 否 |
+| `ort-cuda` / `ort-tensorrt` / `ort-directml` / `ort-coreml` | ORT 执行提供器（隐含 `onnx`） | 否 |
 
 - `cuda` 与 `metal` 互斥，用 `compile_error!` 强制。
 - 运行时：`--device auto|cpu|cuda[:N]|metal` + `SYS1_DEVICE`。
@@ -204,7 +207,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 ## 10. 路线图
 
 - **v1**：candle Laya、官方 API、hub、CLI、进程内接口、CUDA/Metal feature、doctor。
-- **v1.1**：long context、act head、abstention、parallel layout；ORT backend；ONNX 模型；TensorRT EP。ORT 路径以 `ort 2.0.0-rc.13`（ONNX Runtime 1.28，仅 CUDA 13）为基线，TensorRT 需要本机 TensorRT SDK；candle 不能直接承载 TensorRT。
+- **v1.1**：long context、act head、abstention、parallel layout；ORT backend；ONNX 模型；TensorRT EP。ORT 路径使用 `ort 2.0.0-rc.15` + `load-dynamic`，构建期不下载运行时；API 17 已在 ONNX Runtime 1.17 上验证。TensorRT 需要本机 TensorRT SDK；candle 不能直接承载 TensorRT。正式 ONNX 权重产出仍待补。
 - **后续**：Kev 或其他 family；动态插件评估（仅在设计稳定后）。
 
 ### 实现状态（2026-11-17）
@@ -222,6 +225,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - Engine 开销基准（CPU F32 multilingual，30 次交替）：直接推理 121.7 ms 均值、engine 122.6 ms，约 0.9 ms（<1%）；无需进一步优化 manifest 克隆。
 - 可替换 telemetry 与 trace context 已实现：`Telemetry` 事件、`TracingTelemetry`、`ServerExtensions` 注入、`traceparent` 响应头；CLI text/JSON/文件日志。测试覆盖自定义 telemetry、trace id 透传、batch 事件与 JSON 日志文件。
 - 配置热加载已实现：CLI 只应用 `[models]` 增删，新增项标记 `configured`；server 设置/引用变化 409，解析失败 400 且不改目录。真实进程验证 add 92 ms、remove、restart-required 409。
+- 可选 ORT backend 已实现：`sys1-ort` 负责动态 session 与 token-scoring 契约；`sys1-laya/onnx` 共享 tokenization/校准/答案格式化，只替换前向图；`onnx.json` 可覆盖 I/O 名、线程与 `max_batch`。已用合成 ONNX 图验证 batching、padding、marker 索引、factory 与 HTTP 全链路；`ort 2.0.0-rc.15` 在 Windows 上以 `load-dynamic` 成功加载系统 ONNX Runtime 1.17；rc.15 的显式 Environment 生命周期避免了 rc.13 在进程退出时的偶发崩溃。真实 Laya ONNX 导出与 TensorRT EP CI 仍待补。
 - 生产收尾：CORS allowlist/关闭与优雅关闭已实现并有测试；CLI Ctrl-C/SIGTERM 停止接收并 drain。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致；multilingual 特殊 token 已修正。

@@ -42,7 +42,13 @@ cache_dir = "D:/models/sys1-cache"
 # manifest URL. The same names work with `sys1 run`, `pull`, `show`, and `rm`.
 # `POST /api/config/reload` applies [models] additions/removals; other changes
 # require a restart.
+#
+# A local ONNX export directory (model.onnx or an onnx.json sidecar, plus
+# rl_agent_config.json and a tokenizer) uses the same local: syntax. ONNX
+# Runtime is loaded dynamically at model load time; set ORT_DYLIB_PATH when
+# the shared library is not on the platform loader path.
 [models]
 laya-latest = "local:D:/models/laya"
+# laya-onnx = "local:D:/models/laya-onnx"
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 # laya-typed-decisions = "https://example.com/models/laya-typed-decisions/model.json"

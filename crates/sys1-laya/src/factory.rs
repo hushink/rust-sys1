@@ -98,44 +98,68 @@ impl LayaFactory {
     }
 }
 
+impl LayaFactory {
+    fn registered_directory(&self, name: &str) -> Option<(PathBuf, LayaOptions)> {
+        let models = self
+            .models
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        models
+            .get(name)
+            .map(|registered| (registered.directory.clone(), registered.options.clone()))
+    }
+
+    fn registered_router(&self, name: &str) -> Option<(PathBuf, LayaOptions)> {
+        let routers = self
+            .routers
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        routers
+            .get(name)
+            .map(|registered| (registered.root.clone(), registered.options.clone()))
+    }
+}
+
 impl ModelFactory for LayaFactory {
     fn load(&self, manifest: &ModelManifest) -> Result<Arc<dyn DecisionModel>, ModelError> {
-        if manifest.backend != "candle" || manifest.format != "safetensors" {
-            return Err(ModelError::unsupported(format!(
-                "Laya requires backend=candle and format=safetensors, got backend={} format={}",
-                manifest.backend, manifest.format
-            )));
+        match (manifest.backend.as_str(), manifest.format.as_str()) {
+            ("candle", "safetensors") => {
+                if let Some((root, options)) = self.registered_router(&manifest.name) {
+                    return Ok(Arc::new(LayaRouter::new(&root, options)));
+                }
+                let Some((directory, options)) = self.registered_directory(&manifest.name) else {
+                    return Err(ModelError::load(format!(
+                        "no local Laya directory registered for model `{}`",
+                        manifest.name
+                    )));
+                };
+                let model = LayaModel::load_dir(&directory, options)?;
+                Ok(Arc::new(model))
+            }
+            ("onnx", "onnx") => {
+                #[cfg(feature = "onnx")]
+                {
+                    let Some((directory, options)) = self.registered_directory(&manifest.name)
+                    else {
+                        return Err(ModelError::load(format!(
+                            "no local Laya directory registered for model `{}`",
+                            manifest.name
+                        )));
+                    };
+                    let model = crate::onnx::LayaOnnxModel::load_dir(&directory, options)?;
+                    Ok(Arc::new(model))
+                }
+                #[cfg(not(feature = "onnx"))]
+                {
+                    Err(ModelError::unsupported(format!(
+                        "model `{}` is ONNX, but this build of sys1-laya has the `onnx` feature disabled",
+                        manifest.name
+                    )))
+                }
+            }
+            (backend, format) => Err(ModelError::unsupported(format!(
+                "Laya supports backend=candle/format=safetensors or backend=onnx/format=onnx, got backend={backend} format={format}"
+            ))),
         }
-
-        let router = {
-            let routers = self
-                .routers
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            routers
-                .get(&manifest.name)
-                .map(|registered| (registered.root.clone(), registered.options.clone()))
-        };
-        if let Some((root, options)) = router {
-            return Ok(Arc::new(LayaRouter::new(&root, options)));
-        }
-
-        let registered = {
-            let models = self
-                .models
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            models
-                .get(&manifest.name)
-                .map(|registered| (registered.directory.clone(), registered.options.clone()))
-        };
-        let Some((directory, options)) = registered else {
-            return Err(ModelError::load(format!(
-                "no local Laya directory registered for model `{}`",
-                manifest.name
-            )));
-        };
-        let model = LayaModel::load_dir(&directory, options)?;
-        Ok(Arc::new(model))
     }
 }

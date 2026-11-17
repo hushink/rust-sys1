@@ -1,3 +1,4 @@
+use crate::onnx_config::{ONNX_SIDECAR, OnnxFileConfig};
 use crate::{LayaFactory, LayaOptions};
 use indexmap::IndexMap;
 use std::collections::HashSet;
@@ -5,21 +6,40 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use sys1_core::{ModelError, ModelFile, ModelManifest};
 
-/// Whether `directory` contains the files required by a Laya checkpoint.
+/// Whether `directory` contains the files required by a candle Laya
+/// checkpoint.
 pub fn is_checkpoint_directory(directory: &Path) -> bool {
     directory.join("model.safetensors").is_file()
         && directory.join("encoder/config.json").is_file()
         && directory.join("rl_agent_config.json").is_file()
-        && (directory.join("tokenizer/tokenizer.json").is_file()
-            || directory.join("tokenizer/tokenizer.v1.json").is_file()
-            || directory.join("tokenizer.json").is_file())
+        && has_tokenizer(directory)
+}
+
+/// Whether `directory` contains an ONNX export of a Laya checkpoint.
+///
+/// The export must provide `rl_agent_config.json`, a tokenizer, and either
+/// `model.onnx` or an `onnx.json` sidecar naming another `.onnx` file.
+pub fn is_onnx_directory(directory: &Path) -> bool {
+    let weights = directory.join("model.onnx").is_file() || directory.join(ONNX_SIDECAR).is_file();
+    weights && directory.join("rl_agent_config.json").is_file() && has_tokenizer(directory)
+}
+
+/// Whether `directory` is loadable by the Laya factory in any backend.
+pub fn is_model_directory(directory: &Path) -> bool {
+    is_checkpoint_directory(directory) || is_onnx_directory(directory)
 }
 
 /// Whether `directory` is a Laya repository root with all three checkpoints.
 pub fn has_checkpoint_variants(directory: &Path) -> bool {
-    is_checkpoint_directory(directory)
-        && is_checkpoint_directory(&directory.join("multilingual"))
-        && is_checkpoint_directory(&directory.join("typed-decisions"))
+    is_model_directory(directory)
+        && is_model_directory(&directory.join("multilingual"))
+        && is_model_directory(&directory.join("typed-decisions"))
+}
+
+fn has_tokenizer(directory: &Path) -> bool {
+    directory.join("tokenizer/tokenizer.json").is_file()
+        || directory.join("tokenizer/tokenizer.v1.json").is_file()
+        || directory.join("tokenizer.json").is_file()
 }
 
 /// Checkpoint directories exposed by a Laya repository root.
@@ -36,9 +56,10 @@ pub fn variant_directories(root: &Path) -> [(&'static str, PathBuf); 3] {
 pub fn local_checkpoint_manifest(
     directory: &Path,
 ) -> Result<(ModelManifest, IndexMap<String, PathBuf>), ModelError> {
-    if !is_checkpoint_directory(directory) {
+    let candle = is_checkpoint_directory(directory);
+    if !candle && !is_onnx_directory(directory) {
         return Err(ModelError::load(format!(
-            "{} is not a Laya checkpoint directory",
+            "{} is not a Laya checkpoint directory (safetensors or ONNX)",
             directory.display()
         )));
     }
@@ -57,12 +78,36 @@ pub fn local_checkpoint_manifest(
         ))
     })?;
 
-    let mut paths = vec![
-        "model.safetensors",
-        "encoder/config.json",
-        "rl_agent_config.json",
-        tokenizer,
-    ];
+    let (backend, format, model_file, description) = if candle {
+        (
+            "candle",
+            "safetensors",
+            "model.safetensors".to_owned(),
+            format!("Local Laya checkpoint at {}", directory.display()),
+        )
+    } else {
+        let config = OnnxFileConfig::load(directory)?;
+        let model_path = config.model_path(directory)?;
+        if !model_path.is_file() {
+            return Err(ModelError::load(format!(
+                "missing ONNX model at {}",
+                model_path.display()
+            )));
+        }
+        (
+            "onnx",
+            "onnx",
+            config.model.replace('\\', "/"),
+            format!("Local Laya ONNX export at {}", directory.display()),
+        )
+    };
+
+    let mut paths = vec![model_file.as_str(), "rl_agent_config.json", tokenizer];
+    if candle {
+        paths.push("encoder/config.json");
+    } else if directory.join(ONNX_SIDECAR).is_file() {
+        paths.push(ONNX_SIDECAR);
+    }
     for config in ["tokenizer/tokenizer_config.json", "tokenizer_config.json"] {
         if directory.join(config).is_file() {
             paths.push(config);
@@ -94,12 +139,12 @@ pub fn local_checkpoint_manifest(
     let manifest = ModelManifest {
         schema_version: 1,
         name,
-        description: format!("Local Laya checkpoint at {}", directory.display()),
+        description,
         release_date: "1970-01-01".to_owned(),
         family: "laya".to_owned(),
         variant: None,
-        backend: "candle".to_owned(),
-        format: "safetensors".to_owned(),
+        backend: backend.to_owned(),
+        format: format.to_owned(),
         version: "local".to_owned(),
         aliases: Vec::new(),
         files,
@@ -129,17 +174,16 @@ pub fn register_checkpoint_bundle(
     options: LayaOptions,
     name: Option<&str>,
 ) -> Result<Vec<ModelManifest>, ModelError> {
-    if !is_checkpoint_directory(directory) {
+    if !is_model_directory(directory) {
         return Err(ModelError::load(format!(
-            "{} is not a Laya checkpoint directory",
+            "{} is not a Laya checkpoint directory (safetensors or ONNX)",
             directory.display()
         )));
     }
 
     let mut manifest = manifest.clone();
     manifest.family = "laya".to_owned();
-    manifest.backend = "candle".to_owned();
-    manifest.format = "safetensors".to_owned();
+    apply_backend(&mut manifest, directory);
     if let Some(name) = name {
         manifest.name = name.to_owned();
         manifest.aliases.clear();
@@ -148,9 +192,11 @@ pub fn register_checkpoint_bundle(
     let mut manifests = Vec::new();
     let mut seen = HashSet::new();
     if has_checkpoint_variants(directory) {
-        factory.register_router(&manifest.name, directory, options.clone());
+        if supports_router(directory) {
+            factory.register_router(&manifest.name, directory, options.clone());
+        }
         for (variant_name, variant_directory) in variant_directories(directory) {
-            if !is_checkpoint_directory(&variant_directory) {
+            if !is_model_directory(&variant_directory) {
                 continue;
             }
             factory.register(variant_name, &variant_directory, options.clone());
@@ -158,6 +204,7 @@ pub fn register_checkpoint_bundle(
             variant.name = variant_name.to_owned();
             variant.aliases.clear();
             variant.description = format!("{} ({variant_name})", manifest.description);
+            apply_backend(&mut variant, &variant_directory);
             push_unique(&mut manifests, &mut seen, variant);
         }
         manifest.aliases.clear();
@@ -167,6 +214,26 @@ pub fn register_checkpoint_bundle(
         push_unique(&mut manifests, &mut seen, manifest);
     }
     Ok(manifests)
+}
+
+/// Point a manifest at the backend that `directory` can actually load.
+fn apply_backend(manifest: &mut ModelManifest, directory: &Path) {
+    if is_checkpoint_directory(directory) {
+        manifest.backend = "candle".to_owned();
+        manifest.format = "safetensors".to_owned();
+    } else {
+        manifest.backend = "onnx".to_owned();
+        manifest.format = "onnx".to_owned();
+    }
+}
+
+/// A router loads all three candle checkpoints in one process. Mixed or ONNX
+/// bundles register their variants individually instead.
+fn supports_router(directory: &Path) -> bool {
+    is_checkpoint_directory(directory)
+        && variant_directories(directory)
+            .iter()
+            .all(|(_, variant)| is_checkpoint_directory(variant))
 }
 
 fn push_unique(
@@ -336,6 +403,79 @@ mod tests {
         .expect_err("must reject missing checkpoint");
         assert!(matches!(error, ModelError::Load { .. }));
         assert!(factory.registered().is_empty());
+        fs::remove_dir_all(directory).expect("cleanup");
+    }
+
+    #[test]
+    fn builds_a_local_onnx_manifest() {
+        let directory = temp_bundle("onnx-local");
+        fs::remove_file(directory.join("model.safetensors")).expect("remove candle weights");
+        fs::remove_dir_all(directory.join("encoder")).expect("remove encoder config");
+        fs::write(directory.join("model.onnx"), b"onnx").expect("onnx model");
+        fs::write(
+            directory.join("onnx.json"),
+            r#"{"model": "model.onnx", "max_batch": 4}"#,
+        )
+        .expect("sidecar");
+
+        assert!(is_onnx_directory(&directory));
+        assert!(is_model_directory(&directory));
+        assert!(!is_checkpoint_directory(&directory));
+
+        let (manifest, files) = local_checkpoint_manifest(&directory).expect("onnx manifest");
+        assert_eq!(manifest.backend, "onnx");
+        assert_eq!(manifest.format, "onnx");
+        assert!(files.contains_key("model.onnx"));
+        assert!(files.contains_key("onnx.json"));
+        fs::remove_dir_all(directory).expect("cleanup");
+    }
+
+    #[test]
+    fn registers_an_onnx_checkpoint() {
+        let directory = temp_bundle("onnx-register");
+        fs::remove_file(directory.join("model.safetensors")).expect("remove candle weights");
+        fs::remove_dir_all(directory.join("encoder")).expect("remove encoder config");
+        fs::write(directory.join("model.onnx"), b"onnx").expect("onnx model");
+
+        let factory = LayaFactory::new();
+        let manifests = register_checkpoint_bundle(
+            &factory,
+            &manifest("onnx"),
+            &directory,
+            LayaOptions::default(),
+            Some("onnx-custom"),
+        )
+        .expect("register ONNX checkpoint");
+
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].name, "onnx-custom");
+        assert_eq!(manifests[0].backend, "onnx");
+        assert_eq!(manifests[0].format, "onnx");
+        assert_eq!(factory.registered(), vec!["onnx-custom"]);
+        fs::remove_dir_all(directory).expect("cleanup");
+    }
+
+    #[test]
+    fn sidecar_names_a_nested_onnx_model() {
+        let directory = temp_bundle("onnx-nested");
+        fs::remove_file(directory.join("model.safetensors")).expect("remove candle weights");
+        fs::remove_dir_all(directory.join("encoder")).expect("remove encoder config");
+        fs::create_dir_all(directory.join("weights")).expect("weights dir");
+        fs::write(directory.join("weights/model.onnx"), b"onnx").expect("nested model");
+        fs::write(
+            directory.join("onnx.json"),
+            r#"{"model": "weights/model.onnx"}"#,
+        )
+        .expect("sidecar");
+
+        let (manifest, files) = local_checkpoint_manifest(&directory).expect("onnx manifest");
+        assert!(files.contains_key("weights/model.onnx"));
+        assert!(
+            manifest
+                .files
+                .iter()
+                .any(|file| file.path == "weights/model.onnx")
+        );
         fs::remove_dir_all(directory).expect("cleanup");
     }
 }

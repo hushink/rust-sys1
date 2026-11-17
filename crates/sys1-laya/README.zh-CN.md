@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-candle 版 clean-room Laya 决策模型实现。
+candle 版 clean-room Laya 决策模型实现，并提供可选 ONNX Runtime 后端。
 
 ## Checkpoints
 
@@ -18,6 +18,67 @@ encoder/config.json
 rl_agent_config.json
 tokenizer/tokenizer.json
 ```
+
+## ONNX Runtime 后端
+
+启用 `onnx` feature 即可运行导出为 ONNX 的 Laya checkpoint：
+
+```bash
+cargo build -p sys1-laya --features onnx
+```
+
+ONNX 模型目录包含：
+
+```text
+model.onnx                 # 或 onnx.json 指定的文件
+rl_agent_config.json
+tokenizer/tokenizer.json   # 或 tokenizer.json
+onnx.json                  # 可选
+```
+
+`LayaOnnxModel::load_dir` 与 `LayaModel` 共用 tokenization、序列布局、校准和
+答案格式化，仅前向图不同。`LayaFactory` 会加载 `backend = "onnx"`、
+`format = "onnx"` 的 manifest；`is_onnx_directory` / `is_model_directory`
+用于识别这类目录。
+
+### 计算图契约
+
+| 输入 | 类型 | 形状 |
+| --- | --- | --- |
+| `input_ids` | int64 | `[batch, seq]` |
+| `attention_mask` | int64 | `[batch, seq]` |
+| `type_ids` | int64 | `[batch]` |
+| `markers` | int64 | `[n]` |
+
+`markers` 是 `input_ids` 的扁平索引 `row * seq + position`。计算图需依次完成
+encoder、type embedding、decision head、marker gather 与 scorer，并输出形状为
+`[n]` 的 float32 `logits`，每个 marker 一个 logit。batch 与 seq 轴必须是动态的。
+
+`onnx.json` 可覆盖默认值：
+
+```json
+{
+  "model": "model.onnx",
+  "max_batch": 8,
+  "intra_threads": 4,
+  "inter_threads": 1,
+  "input_ids": "input_ids",
+  "attention_mask": "attention_mask",
+  "type_ids": "type_ids",
+  "markers": "markers",
+  "output": "logits"
+}
+```
+
+`max_batch` 限制每次 ONNX run 的 unique item 数，超出会切分。ONNX Runtime 在创建
+session 时动态加载：设置 `ORT_DYLIB_PATH` 指向 `onnxruntime` 共享库，或将库放入
+平台加载路径。构建期不会下载运行时二进制。绑定以 ONNX Runtime API 17 为目标，
+已在 1.17 上验证。
+
+执行提供器 feature：`ort-cuda`、`ort-tensorrt`、`ort-directml`、`ort-coreml`
+（均隐含 `onnx`）。TensorRT 需要本机 TensorRT SDK。官方尚未发布 Laya ONNX
+产物；需使用符合上述契约的导出器。仓库测试使用合成计算图验证 batching、padding、
+marker 索引与 factory 接线，不验证与 candle checkpoint 的数值一致性。
 
 ## 示例
 
@@ -81,7 +142,9 @@ v1 的 Router 是启发式；完整官方 routing golden 对齐待补。
 
 checkpoint 布局知识集中在 sys1-laya，组合层无需再定义 Laya 前缀 API：
 
-- `is_checkpoint_directory` / `has_checkpoint_variants`
+- `is_checkpoint_directory` — candle safetensors checkpoint 布局
+- `is_onnx_directory` / `is_model_directory` — ONNX 导出布局，或任一后端
+- `has_checkpoint_variants`
 - `variant_directories` — 仓库根目录下的三个目录名与路径
 - `local_checkpoint_manifest` — 为没有 `model.json` 的裸 checkpoint 目录生成
   manifest 与文件映射
@@ -126,7 +189,9 @@ eager。
 
 ## Features
 
-`cuda`、`cudnn`、`metal`、`accelerate` 转发到 candle。
+`onnx` 启用 ONNX Runtime 与 `LayaOnnxModel`；`cuda`、`cudnn`、`metal`、
+`accelerate` 转发到 candle；`ort-cuda`、`ort-tensorrt`、`ort-directml`、
+`ort-coreml` 启用 ONNX Runtime 执行提供器。
 
 FlashAttention 未启用：932 token 原型快约 2.6x，但决策输出发生变化；上游
 kernel 在当前 CUDA 13.4/Windows 工具链上也构建失败。eager attention 仍是
