@@ -6,7 +6,10 @@ use sys1_core::{
     ModelManifest, ModelRegistry, ModelResolver, Prediction, PredictionOptions, Questions,
     RegistryConfig,
 };
-use sys1_families::{FamilyFactory, is_supported_directory, local_manifest, register_bundle};
+use sys1_families::{
+    BundleOptions, FamilyFactory, FamilyOptions, is_supported_directory, local_manifest,
+    register_bundle, resolve_bundle_overrides,
+};
 use sys1_hub::{CacheResidency, Hub, HubConfig, HubError, ModelRef};
 use sys1_protocol::{ModelMetadata, State, SystemOneResponse};
 use thiserror::Error;
@@ -23,6 +26,8 @@ pub struct EngineOptions {
     pub registry: RegistryConfig,
     /// Device, dtype, context length, confidence, and attention options.
     pub model: ModelOptions,
+    /// Per-family overrides shared by every model the engine registers.
+    pub families: FamilyOptions,
 }
 
 impl Default for EngineOptions {
@@ -31,6 +36,7 @@ impl Default for EngineOptions {
             hub: HubConfig::from_env(),
             registry: RegistryConfig::default(),
             model: ModelOptions::default(),
+            families: FamilyOptions::default(),
         }
     }
 }
@@ -70,6 +76,7 @@ pub struct InferenceEngine {
     factory: Arc<FamilyFactory>,
     registry: Arc<ModelRegistry>,
     options: ModelOptions,
+    families: FamilyOptions,
     catalog_lock: Mutex<()>,
 }
 
@@ -88,6 +95,7 @@ impl InferenceEngine {
             hub,
             registry,
             model,
+            families,
         } = options;
         let hub = Hub::new(hub)?;
         let factory = Arc::new(FamilyFactory::new());
@@ -98,6 +106,7 @@ impl InferenceEngine {
             factory,
             registry,
             options: model,
+            families,
             catalog_lock: Mutex::new(()),
         })
     }
@@ -336,13 +345,39 @@ impl InferenceEngine {
             ))
             .into());
         }
+        let overrides = resolve_bundle_overrides(&directory, &self.families, |base_reference| {
+            self.pull_base(base_reference)
+        })?;
+        let bundle = BundleOptions {
+            families: self.families.clone(),
+            overrides,
+        };
         Ok(register_bundle(
             &self.factory,
             &manifest,
             &directory,
             &self.options,
+            &bundle,
             name,
         )?)
+    }
+
+    fn pull_base(&self, reference: &str) -> Result<PathBuf, ModelError> {
+        let parsed: ModelRef = reference.parse().map_err(|error| {
+            ModelError::load(format!("invalid Kev base `{reference}`: {error}"))
+        })?;
+        if parsed.scheme == "local" {
+            let path = PathBuf::from(&parsed.location);
+            if path.is_dir() && !path.join("model.json").is_file() {
+                return Ok(path);
+            }
+        }
+        self.hub
+            .pull(reference)
+            .map(|pulled| pulled.directory)
+            .map_err(|error| {
+                ModelError::load(format!("cannot resolve Kev base `{reference}`: {error}"))
+            })
     }
 
     fn lock_catalog(&self) -> std::sync::MutexGuard<'_, ()> {

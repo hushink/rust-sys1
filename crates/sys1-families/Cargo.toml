@@ -20,6 +20,9 @@ sys1-qwen3guard = { path = "../sys1-qwen3guard" }
 sys1-von = { path = "../sys1-von" }
 indexmap.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 default = []
 onnx = ["sys1-laya/onnx"]

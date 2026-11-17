@@ -1,8 +1,10 @@
-use crate::pull_model;
+use crate::{pull_base, pull_model};
 use indexmap::IndexMap;
 use std::sync::{Arc, RwLock};
 use sys1_core::{ModelError, ModelManifest, ModelResolver};
-use sys1_families::{FamilyFactory, register_bundle};
+use sys1_families::{
+    BundleOptions, FamilyFactory, FamilyOptions, register_bundle, resolve_bundle_overrides,
+};
 use sys1_hub::Hub;
 use sys1_laya::LayaOptions;
 
@@ -12,6 +14,7 @@ pub struct HubModelResolver {
     hub: Arc<Hub>,
     factory: Arc<FamilyFactory>,
     options: LayaOptions,
+    families: FamilyOptions,
     /// `[models]` aliases from `sys1.toml`, so the admin API can accept the
     /// same names as the CLI. Replaced atomically on config reload.
     references: RwLock<IndexMap<String, String>>,
@@ -22,12 +25,14 @@ impl HubModelResolver {
         hub: Arc<Hub>,
         factory: Arc<FamilyFactory>,
         options: LayaOptions,
+        families: FamilyOptions,
         references: IndexMap<String, String>,
     ) -> Self {
         Self {
             hub,
             factory,
             options,
+            families,
             references: RwLock::new(references),
         }
     }
@@ -54,11 +59,20 @@ impl HubModelResolver {
         let pulled = pull_model(self.hub.as_ref(), &reference).map_err(|error| {
             ModelError::load(format!("cannot resolve `{reference}`: {error:#}"))
         })?;
+        let overrides =
+            resolve_bundle_overrides(&pulled.directory, &self.families, |base_reference| {
+                pull_base(self.hub.as_ref(), base_reference)
+            })?;
+        let bundle = BundleOptions {
+            families: self.families.clone(),
+            overrides,
+        };
         register_bundle(
             &self.factory,
             &pulled.manifest,
             &pulled.directory,
             &self.options,
+            &bundle,
             name,
         )
     }
@@ -124,7 +138,13 @@ mod tests {
             "configured".to_owned(),
             format!("local:{}", directory.display()),
         );
-        let resolver = HubModelResolver::new(hub, factory, LayaOptions::default(), references);
+        let resolver = HubModelResolver::new(
+            hub,
+            factory,
+            LayaOptions::default(),
+            FamilyOptions::default(),
+            references,
+        );
 
         let manifests = resolver.resolve("configured").expect("resolve reference");
         assert_eq!(manifests.len(), 1);

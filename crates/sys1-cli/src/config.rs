@@ -4,6 +4,9 @@ use serde::Deserialize;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use sys1_families::{
+    DecimaFamilyOptions, DecisionFamilyOptions, FamilyOptions, KevFamilyOptions, MaxLenOptions,
+};
 
 const CONFIG_FILE: &str = "sys1.toml";
 
@@ -16,6 +19,8 @@ pub struct FileConfig {
     pub hub: HubSection,
     #[serde(default)]
     pub server: ServerSection,
+    #[serde(default)]
+    pub families: FamiliesSection,
     /// `name = "local:/path"`, `hf:owner/repo`, or any supported `ModelRef`.
     #[serde(default)]
     pub models: IndexMap<String, String>,
@@ -36,6 +41,9 @@ pub struct HubSection {
     pub modelscope_token: Option<String>,
     pub http_token: Option<String>,
     pub timeout_secs: Option<u64>,
+    /// Maximum time per download attempt. Large files resume from the partial
+    /// file, so this bounds stalls rather than total transfer time.
+    pub download_timeout_secs: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -73,6 +81,82 @@ pub struct ServerSection {
     pub log_file: Option<PathBuf>,
     /// CORS allowlist. Omit for permissive; `[]` disables CORS.
     pub cors_origins: Option<Vec<String>>,
+}
+
+/// Per-family settings for the candle model families.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FamiliesSection {
+    /// Cross-request batch size for encoder families (default 32).
+    pub max_batch: Option<usize>,
+    #[serde(default)]
+    pub qwen3guard: MaxLenSection,
+    #[serde(default)]
+    pub von: MaxLenSection,
+    #[serde(default)]
+    pub clef: MaxLenSection,
+    #[serde(default)]
+    pub decima: DecimaSection,
+    #[serde(default)]
+    pub kev: KevSection,
+    #[serde(default)]
+    pub decision: DecisionSection,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaxLenSection {
+    pub max_len: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecimaSection {
+    /// Override `choice_fit` from `decima.json`.
+    pub choice_fit: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KevSection {
+    /// Qwen3.5 base directory. Relative paths resolve from this config file.
+    pub base_dir: Option<PathBuf>,
+    /// Pointer-logit temperature; defaults to `kev.json` or `head.pt`.
+    pub temperature: Option<f32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionSection {
+    /// Endpoint-logit temperature; defaults to the checkpoint calibration.
+    pub temperature: Option<f32>,
+}
+
+impl FamiliesSection {
+    pub fn to_options(&self) -> FamilyOptions {
+        FamilyOptions {
+            max_batch: self.max_batch,
+            qwen3guard: MaxLenOptions {
+                max_len: self.qwen3guard.max_len,
+            },
+            von: MaxLenOptions {
+                max_len: self.von.max_len,
+            },
+            clef: MaxLenOptions {
+                max_len: self.clef.max_len,
+            },
+            decima: DecimaFamilyOptions {
+                choice_fit: self.decima.choice_fit,
+            },
+            kev: KevFamilyOptions {
+                base_dir: self.kev.base_dir.clone(),
+                temperature: self.kev.temperature,
+            },
+            decision: DecisionFamilyOptions {
+                temperature: self.decision.temperature,
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -138,6 +222,9 @@ pub fn load(explicit: Option<&Path>) -> anyhow::Result<LoadedConfig> {
     }
     if let Some(log_file) = value.server.log_file.take() {
         value.server.log_file = Some(resolve_path(&base_dir, &log_file));
+    }
+    if let Some(base) = value.families.kev.base_dir.take() {
+        value.families.kev.base_dir = Some(resolve_path(&base_dir, &base));
     }
     for reference in value.models.values_mut() {
         *reference = resolve_reference(&base_dir, reference);
@@ -208,6 +295,8 @@ mod tests {
             [hub]
             cache_dir = "D:/models/sys1"
             max_cache_bytes = 34359738368
+            timeout_secs = 30
+            download_timeout_secs = 600
 
             [server]
             bind = "0.0.0.0:8080"
@@ -224,11 +313,35 @@ mod tests {
             log_file = "logs/sys1.log"
             cors_origins = ["https://app.example"]
 
+            [families]
+            max_batch = 16
+
+            [families.qwen3guard]
+            max_len = 32768
+
+            [families.von]
+            max_len = 4096
+
+            [families.clef]
+            max_len = 8192
+
+            [families.decima]
+            choice_fit = true
+
+            [families.kev]
+            base_dir = "D:/models/qwen-base"
+            temperature = 2.351
+
+            [families.decision]
+            temperature = 1.0
+
             [models]
             laya-latest = "local:D:/models/laya"
         "#;
         let config: FileConfig = toml::from_str(text).expect("config");
         assert_eq!(config.hub.max_cache_bytes, Some(34_359_738_368));
+        assert_eq!(config.hub.timeout_secs, Some(30));
+        assert_eq!(config.hub.download_timeout_secs, Some(600));
         assert_eq!(config.server.batch_max, Some(64));
         assert_eq!(config.server.metrics, Some(false));
         assert_eq!(config.server.laya_auto_task_detection, Some(true));
@@ -252,5 +365,27 @@ mod tests {
             config.models.get("laya-latest").map(String::as_str),
             Some("local:D:/models/laya")
         );
+
+        let families = config.families.to_options();
+        assert_eq!(families.max_batch, Some(16));
+        assert_eq!(families.qwen3guard.max_len, Some(32_768));
+        assert_eq!(families.von.max_len, Some(4096));
+        assert_eq!(families.clef.max_len, Some(8192));
+        assert_eq!(families.decima.choice_fit, Some(true));
+        assert_eq!(
+            families.kev.base_dir.as_deref(),
+            Some(Path::new("D:/models/qwen-base"))
+        );
+        assert_eq!(families.kev.temperature, Some(2.351));
+        assert_eq!(families.decision.temperature, Some(1.0));
+    }
+
+    #[test]
+    fn resolves_relative_kev_base() {
+        let base = Path::new("C:/models/config");
+        let mut config = FamiliesSection::default();
+        config.kev.base_dir = Some(PathBuf::from("qwen-base"));
+        let resolved = resolve_path(base, config.kev.base_dir.as_deref().unwrap());
+        assert_eq!(resolved, PathBuf::from("C:/models/config/qwen-base"));
     }
 }

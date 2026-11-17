@@ -269,6 +269,8 @@ cache_dir = "D:/models/sys1-cache"  # model download/cache directory
 # max_cache_bytes = 34359738368    # omit or 0 = unlimited; LRU eviction before pull
 # hf_endpoint = "https://huggingface.co"
 # modelscope_endpoint = "https://modelscope.cn"
+# timeout_secs = 60            # metadata/connection timeout
+# download_timeout_secs = 300  # per-attempt; large files resume by range
 
 [server]
 # bind = "127.0.0.1:8080"
@@ -285,15 +287,34 @@ cache_dir = "D:/models/sys1-cache"  # model download/cache directory
 # log_file = "logs/sys1.log"   # append instead of stdout
 # cors_origins = ["https://app.example"]  # [] disables CORS; omit = permissive
 
+[families]
+# max_batch = 32                       # encoder families: NLI/GLiClass/Von/Decima
+# [families.qwen3guard]
+# max_len = 32768
+# [families.von]
+# max_len = 8192
+# [families.clef]
+# max_len = 8192
+# [families.decima]
+# choice_fit = false                  # override decima.json
+# [families.kev]
+# base_dir = "D:/models/qwen3.5-0.8b-base"
+# temperature = 2.351                 # otherwise kev.json / head.pt
+# [families.decision]
+# temperature = 1.0
+
 [models]
 laya-latest = "local:D:/models/laya"       # local model directory
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+# kev = "hf:jaredpalmer/kev-0.8b"          # pulls the declared Qwen3.5 base too
 ```
 
 Relative paths in the file resolve from the config file's directory.
 `[models]` names are usable by `serve`, `run`, `pull`, `show`, and `rm`.
-Credentials are preferably supplied through `HF_TOKEN`,
-`MODELSCOPE_API_TOKEN`, and `SYS1_HUB_TOKEN`.
+Kev adapters resolve their Qwen3.5 base from `base_dir`, a `base/` sibling, or
+the repository recorded in `head.pt` / `adapter_config.json`; an `hf:` adapter
+therefore pulls the base on first use. Credentials are preferably supplied
+through `HF_TOKEN`, `MODELSCOPE_API_TOKEN`, and `SYS1_HUB_TOKEN`.
 
 With `[hub] max_cache_bytes` (or `--max-cache-bytes` /
 `SYS1_MAX_CACHE_BYTES`), each pull evicts the least-recently-used non-resident

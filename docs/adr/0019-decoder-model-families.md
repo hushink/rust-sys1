@@ -18,8 +18,12 @@ hybrid decoder；Qwen3Guard 使用 dense Qwen3。若每个 family 各自实现 d
    `sys1-decision`、`sys1-clef`；Von 与 Decima 使用共享 ModernBERT。
 3. `sys1-families` 负责识别所有目录并统一注册；`local_manifest` 递归收集
    checkpoint 文件，支持 `pytorch/`、`backbone/`、`base/` 等嵌套布局。
-4. Kev 的 base 不随 adapter 仓库发布；目录约定为同目录或 `base/`，也允许
-   `KevOptions::base_directory` 显式指定。
+4. Kev 的 base 不随 adapter 仓库发布。加载器依次接受显式
+   `KevOptions::base_directory` / `[families.kev] base_dir`、同目录或 `base/`
+   的本地 base，以及 `kev.json`、`head.pt`、`provenance.json`、
+   `adapter_config.json` 中声明的仓库（含 revision）；后者由 CLI/engine 通过
+   hub 回调自动拉取。温度同样优先使用显式配置，其次 `kev.json`，再次
+   `head.pt` 内嵌的标定值。
 
 **取舍**：
 

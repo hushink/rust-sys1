@@ -7,22 +7,26 @@ optional PEFT LoRA adapter and a two-projection pointer head.
 
 ## Directory layout
 
-The KeV repository ships only the adapter, head and tokenizer. Put the Qwen3.5
-base beside them or in a `base/` subdirectory:
+The Kev repository ships only the adapter, head and tokenizer. Put the Qwen3.5
+base beside them, in a `base/` subdirectory, or let the loader pull the base
+declared by the checkpoint:
 
 ```text
 kev/
-  adapter_config.json
+  adapter_config.json   # base_model_name_or_path = Qwen/Qwen3.5-0.8B-Base
   adapter_model.safetensors
-  head.pt
+  head.pt               # records base, base_revision and calibrated temperature
   tokenizer.json
-  base/                 # or put these files directly in kev/
+  base/                 # optional; or put these files directly in kev/
     config.json
     model.safetensors
 ```
 
-`KevOptions::base_directory` overrides the location. LoRA is merged into the
-base linear layers at load time with `W + α/r · B A`.
+`KevOptions::base_directory` (CLI: `[families.kev] base_dir`) overrides the
+location. Otherwise `resolve_base_directory` reads `kev.json`, `head.pt`,
+`provenance.json`, or `adapter_config.json`, appends the declared revision, and
+hands the reference to the caller's pull callback. LoRA is merged into the base
+linear layers at load time with `W + α/r · B A`.
 
 ## Rows
 
@@ -35,8 +39,9 @@ base linear layers at load time with `W + α/r · B A`.
 
 `user(text)` rewrites every `<|name|>` to `<¦name¦>` so text cannot create
 delimiters. Option scores are `k(h[option_close]) · q(h[decide]) / √256`;
-softmax over the checkpoint temperature (from `kev.json` when present, otherwise
-2.351 for kev-0.8b).
+softmax uses, in order: `KevOptions::temperature`, `kev.json`, the calibrated
+temperature embedded in `head.pt`, and finally 2.351. The 4B/9B checkpoints
+therefore use their own fitted temperature without extra configuration.
 
 ## Test
 

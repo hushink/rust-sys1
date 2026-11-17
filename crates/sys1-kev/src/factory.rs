@@ -79,27 +79,22 @@ impl ModelFactory for KevFactory {
     }
 }
 
-/// Whether `directory` holds a Kev adapter, head, tokenizer, and a Qwen3.5 base
-/// either beside them or under `base/`.
-pub fn is_kev_directory(directory: &Path) -> bool {
-    let adapter = directory.join("adapter_model.safetensors").is_file()
+/// Whether `directory` holds the Kev adapter, head, and tokenizer. The Qwen3.5
+/// base may live beside them, under `base/`, or be pulled from the repository
+/// declared in the adapter metadata.
+pub fn is_kev_adapter(directory: &Path) -> bool {
+    directory.join("adapter_model.safetensors").is_file()
         && directory.join("adapter_config.json").is_file()
         && directory.join("head.pt").is_file()
-        && directory.join("tokenizer.json").is_file();
-    if !adapter {
-        return false;
-    }
-    [directory.to_path_buf(), directory.join("base")]
-        .into_iter()
-        .any(|base| {
-            base.join("config.json").is_file()
-                && std::fs::read_dir(&base).ok().is_some_and(|entries| {
-                    entries.filter_map(|entry| entry.ok()).any(|entry| {
-                        entry
-                            .file_name()
-                            .to_string_lossy()
-                            .ends_with(".safetensors")
-                    })
-                })
-        })
+        && directory.join("tokenizer.json").is_file()
+}
+
+/// Whether a Qwen3.5 base is present beside the adapter or under `base/`.
+pub fn has_kev_base(directory: &Path) -> bool {
+    crate::local_base(directory).is_some()
+}
+
+/// Whether `directory` is a Kev checkpoint directory.
+pub fn is_kev_directory(directory: &Path) -> bool {
+    is_kev_adapter(directory)
 }

@@ -26,6 +26,7 @@ struct ServerState {
     file: Vec<u8>,
     token: Option<String>,
     requests: Mutex<Vec<Request>>,
+    truncate_first: AtomicBool,
 }
 
 struct TestServer {
@@ -70,6 +71,7 @@ impl TestServer {
             file: content.to_vec(),
             token: token.map(str::to_owned),
             requests: Mutex::new(Vec::new()),
+            truncate_first: AtomicBool::new(false),
         });
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
@@ -183,6 +185,17 @@ fn handle_connection(mut stream: TcpStream, state: &ServerState) -> std::io::Res
                 &state.manifest,
             )?,
             "/weights.bin" => {
+                if range.is_none() && state.truncate_first.swap(false, Ordering::SeqCst) {
+                    let half = state.file.len() / 2;
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+                        state.file.len()
+                    );
+                    stream.write_all(head.as_bytes())?;
+                    stream.write_all(&state.file[..half])?;
+                    stream.flush()?;
+                    return Ok(());
+                }
                 let total = state.file.len();
                 let offset = range
                     .as_deref()
@@ -336,6 +349,34 @@ fn resumes_a_partial_download_with_range() {
         .find(|request| request.path == "/weights.bin")
         .expect("file request");
     assert_eq!(file_request.range.as_deref(), Some("bytes=10-"));
+}
+
+#[test]
+fn retries_a_truncated_download_from_the_partial_file() {
+    let content: Vec<u8> = (0..4096).map(|index| (index % 251) as u8).collect();
+    let server = TestServer::start(&content, None);
+    server.state.truncate_first.store(true, Ordering::SeqCst);
+    let temp = tempfile::tempdir().expect("temp dir");
+    let hub = hub(&temp.path().join("cache"));
+
+    let pulled = hub.pull(&server.base_url).expect("retried HTTP pull");
+    assert_eq!(
+        fs::read(pulled.files["weights.bin"].as_path()).expect("cached file"),
+        content
+    );
+
+    let requests = server.requests();
+    let ranges: Vec<_> = requests
+        .iter()
+        .filter(|request| request.path == "/weights.bin")
+        .filter_map(|request| request.range.as_deref())
+        .collect();
+    assert!(
+        ranges
+            .iter()
+            .any(|range| *range != "bytes=0-" && range.starts_with("bytes=")),
+        "expected a resumed range request, got {ranges:?}"
+    );
 }
 
 #[test]

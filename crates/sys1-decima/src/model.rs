@@ -1,3 +1,4 @@
+use crate::bert::{BertConfig, BertEncoder};
 use candle_core::{DType, Device, Tensor};
 use candle_nn::{Activation, LayerNorm, Linear, Module, VarBuilder, layer_norm, linear};
 use indexmap::IndexMap;
@@ -18,6 +19,8 @@ pub struct DecimaOptions {
     pub device: Device,
     pub dtype: DType,
     pub max_batch: usize,
+    /// Override the `choice_fit` setting from `decima.json`.
+    pub choice_fit: Option<bool>,
 }
 
 impl Default for DecimaOptions {
@@ -26,6 +29,7 @@ impl Default for DecimaOptions {
             device: Device::Cpu,
             dtype: DType::F32,
             max_batch: 32,
+            choice_fit: None,
         }
     }
 }
@@ -477,10 +481,31 @@ enum QuestionKind {
 
 type QuestionScores = (Vec<f32>, Vec<f32>, Vec<f32>);
 
+enum EncoderKind {
+    Modern(Encoder),
+    Bert(BertEncoder),
+}
+
+impl EncoderKind {
+    fn forward(
+        &self,
+        ids: &Tensor,
+        mask: &Tensor,
+        has_padding: bool,
+    ) -> Result<Tensor, ModelError> {
+        match self {
+            Self::Modern(encoder) => encoder
+                .forward(ids, mask, has_padding)
+                .map_err(inference_error),
+            Self::Bert(encoder) => encoder.forward(ids, mask),
+        }
+    }
+}
+
 /// A Decima late-interaction model.
 pub struct DecimaModel {
     tokenizer: Tokenizer,
-    encoder: Encoder,
+    encoder: EncoderKind,
     scorer: Scorer,
     config: DecimaConfig,
     bos: u32,
@@ -497,22 +522,41 @@ impl DecimaModel {
             directory.to_path_buf()
         };
         let config_path = checkpoint.join("decima.json");
-        let config: DecimaConfig =
+        let mut config: DecimaConfig =
             serde_json::from_slice(&std::fs::read(&config_path).map_err(|error| {
                 ModelError::load(format!("read {}: {error}", config_path.display()))
             })?)
             .map_err(|error| {
                 ModelError::load(format!("parse {}: {error}", config_path.display()))
             })?;
+        if let Some(choice_fit) = options.choice_fit {
+            config.choice_fit = choice_fit;
+        }
         if config.max_state_tokens < 3 || config.max_choice_tokens < 3 {
             return Err(ModelError::load("Decima token budgets are too small"));
         }
         let encoder_dir = checkpoint.join("encoder");
-        let mut encoder_config =
-            ModernBertConfig::load(&encoder_dir.join("config.json")).map_err(ModelError::load)?;
-        if encoder_config.max_position_embeddings < config.max_state_tokens {
-            encoder_config.max_position_embeddings = config.max_state_tokens;
-        }
+        let config_path = encoder_dir.join("config.json");
+        let config_bytes = std::fs::read(&config_path).map_err(|error| {
+            ModelError::load(format!("read {}: {error}", config_path.display()))
+        })?;
+        let raw: serde_json::Value = serde_json::from_slice(&config_bytes).map_err(|error| {
+            ModelError::load(format!("parse {}: {error}", config_path.display()))
+        })?;
+        let is_bert = raw
+            .get("model_type")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|model_type| model_type.eq_ignore_ascii_case("bert"))
+            || raw
+                .get("architectures")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|architectures| {
+                    architectures.iter().any(|value| {
+                        value
+                            .as_str()
+                            .is_some_and(|name| name.contains("BertModel"))
+                    })
+                });
         let tokenizer_path = [
             encoder_dir.join("tokenizer.json"),
             checkpoint.join("tokenizer.json"),
@@ -531,28 +575,55 @@ impl DecimaModel {
             candle_core::safetensors::load(encoder_dir.join("model.safetensors"), &options.device)
                 .map_err(|error| ModelError::load(format!("load encoder: {error}")))?;
         let encoder_vb = VarBuilder::from_tensors(encoder_tensors, options.dtype, &options.device);
-        let prefix = ["model.", "", "encoder.", "encoder.model."]
-            .into_iter()
-            .find(|prefix| {
-                encoder_vb.contains_tensor(&format!("{prefix}embeddings.tok_embeddings.weight"))
-            })
-            .ok_or_else(|| ModelError::load("Decima encoder has no token embeddings"))?;
-        let encoder = Encoder::load(encoder_vb, &encoder_config, options.dtype, false, prefix)
-            .map_err(|error| ModelError::load(error.to_string()))?;
+        let (encoder, hidden_size, bos, eos) = if is_bert {
+            let bert_config = BertConfig::from_slice(&config_bytes)
+                .map_err(|error| ModelError::load(format!("parse BERT config: {error}")))?;
+            if config.max_state_tokens > bert_config.max_position_embeddings {
+                return Err(ModelError::load(format!(
+                    "Decima state budget {} exceeds the BERT encoder's {} positions",
+                    config.max_state_tokens, bert_config.max_position_embeddings
+                )));
+            }
+            let hidden_size = bert_config.hidden_size;
+            let bos = bert_config.cls_token_id.unwrap_or(0);
+            let eos = bert_config.sep_token_id.unwrap_or(2);
+            (
+                EncoderKind::Bert(BertEncoder::load(encoder_vb, &bert_config)?),
+                hidden_size,
+                bos,
+                eos,
+            )
+        } else {
+            let mut encoder_config = ModernBertConfig::from_slice(&config_bytes)
+                .map_err(|error| ModelError::load(format!("parse encoder config: {error}")))?;
+            if encoder_config.max_position_embeddings < config.max_state_tokens {
+                encoder_config.max_position_embeddings = config.max_state_tokens;
+            }
+            let prefix = ["model.", "", "encoder.", "encoder.model."]
+                .into_iter()
+                .find(|prefix| {
+                    encoder_vb.contains_tensor(&format!("{prefix}embeddings.tok_embeddings.weight"))
+                })
+                .ok_or_else(|| ModelError::load("Decima encoder has no token embeddings"))?;
+            let hidden_size = encoder_config.hidden_size;
+            let bos = encoder_config
+                .bos_token_id
+                .or(encoder_config.cls_token_id)
+                .unwrap_or(2);
+            let eos = encoder_config
+                .eos_token_id
+                .or(encoder_config.sep_token_id)
+                .unwrap_or(1);
+            let encoder = Encoder::load(encoder_vb, &encoder_config, options.dtype, false, prefix)
+                .map_err(|error| ModelError::load(error.to_string()))?;
+            (EncoderKind::Modern(encoder), hidden_size, bos, eos)
+        };
 
         let head_path = checkpoint.join("head.safetensors");
         let head_tensors = candle_core::safetensors::load(&head_path, &options.device)
             .map_err(|error| ModelError::load(format!("load head: {error}")))?;
         let head_vb = VarBuilder::from_tensors(head_tensors, options.dtype, &options.device);
-        let scorer = Scorer::load(head_vb, encoder_config.hidden_size, &config)?;
-        let bos = encoder_config
-            .bos_token_id
-            .or(encoder_config.cls_token_id)
-            .unwrap_or(2);
-        let eos = encoder_config
-            .eos_token_id
-            .or(encoder_config.sep_token_id)
-            .unwrap_or(1);
+        let scorer = Scorer::load(head_vb, hidden_size, &config)?;
         Ok(Self {
             tokenizer,
             encoder,
@@ -811,10 +882,7 @@ impl DecimaModel {
         .map_err(inference_error)?;
         let state_mask = Tensor::ones((1, plan.state.ids.len()), self.dtype, &self.device)
             .map_err(inference_error)?;
-        let state_hidden = self
-            .encoder
-            .forward(&state_ids, &state_mask, false)
-            .map_err(inference_error)?;
+        let state_hidden = self.encoder.forward(&state_ids, &state_mask, false)?;
         let mut scores = Vec::with_capacity(plan.options.len());
         let mut latent = Vec::with_capacity(plan.options.len());
         for option in &plan.options {
@@ -822,10 +890,7 @@ impl DecimaModel {
                 .map_err(inference_error)?;
             let mask = Tensor::ones((1, option.ids.len()), self.dtype, &self.device)
                 .map_err(inference_error)?;
-            let hidden = self
-                .encoder
-                .forward(&ids, &mask, false)
-                .map_err(inference_error)?;
+            let hidden = self.encoder.forward(&ids, &mask, false)?;
             let (score, z) = self
                 .scorer
                 .forward(&state_hidden, &state_mask, &hidden, &mask)?;

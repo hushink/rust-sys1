@@ -3,9 +3,13 @@
 [简体中文](README.zh-CN.md)
 
 Decima (`decima-late-interaction-v1`/`-v2`) implemented with candle. A
-ModernBERT encoder (mmBERT for `decima-base`) encodes the state and every option
+ModernBERT encoder (mmBERT for `decima-base`) or a BERT encoder
+(`multilingual-e5-small` for `decima-small`) encodes the state and every option
 separately; a late-interaction scorer lets each option read the state tokens
-before producing one raw score. Options never attend to each other.
+before producing one raw score. Options never attend to each other. The encoder
+architecture is selected from `encoder/config.json` (`model_type = "bert"`
+versus ModernBERT); BERT uses `[CLS]`/`[SEP]` ids 0 and 2 unless the config
+overrides them.
 
 ## Rows
 
@@ -23,7 +27,8 @@ option row  [cls] tok(option_prefix + normalize(text + " " + option))[..max_choi
 - A state row over the budget is rejected (`STATE_TRUNCATED`); an option row is
   cut silently, as upstream does.
 - `choice_fit`/`option_fit` checkpoints fit the question into the option window
-  when the full text does not fit.
+  when the full text does not fit. `DecimaOptions::choice_fit` (CLI:
+  `[families.decima] choice_fit`) overrides the value from `decima.json`.
 
 Choice and noul probabilities are `softmax(scores / T)`. Score questions use
 Decima's cumulative-link ordinal head on the same scores.

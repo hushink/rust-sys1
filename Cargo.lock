@@ -2759,6 +2759,7 @@ name = "sys1-families"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "serde_json",
  "sys1-clef",
  "sys1-core",
  "sys1-decima",
@@ -2817,6 +2818,7 @@ dependencies = [
  "sys1-protocol",
  "sys1-qwen",
  "tokenizers",
+ "zip",
 ]
 
 [[package]]

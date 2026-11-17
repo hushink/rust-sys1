@@ -15,7 +15,12 @@ pub struct HubConfig {
     pub hf_token: Option<String>,
     pub modelscope_token: Option<String>,
     pub http_token: Option<String>,
+    /// Timeout for metadata requests and connection setup.
     pub timeout: Duration,
+    /// Maximum time for one download attempt. Large files resume with HTTP
+    /// ranges when an attempt times out, so this bounds stalls rather than the
+    /// total transfer time.
+    pub download_timeout: Duration,
 }
 
 impl HubConfig {
@@ -30,6 +35,7 @@ impl HubConfig {
             modelscope_token: env_non_empty("MODELSCOPE_API_TOKEN"),
             http_token: env_non_empty("SYS1_HUB_TOKEN"),
             timeout: Duration::from_secs(60),
+            download_timeout: Duration::from_secs(300),
         }
     }
 
@@ -65,6 +71,11 @@ impl HubConfig {
             env_non_empty("SYS1_HTTP_TIMEOUT_SECS").and_then(|value| value.parse::<u64>().ok())
         {
             self.timeout = Duration::from_secs(value.max(1));
+        }
+        if let Some(value) = env_non_empty("SYS1_HUB_DOWNLOAD_TIMEOUT_SECS")
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            self.download_timeout = Duration::from_secs(value.max(1));
         }
         self.offline = env_truthy("HF_HUB_OFFLINE")
             || env_truthy("TRANSFORMERS_OFFLINE")

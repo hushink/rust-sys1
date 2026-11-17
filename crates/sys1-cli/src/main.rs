@@ -20,11 +20,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sys1_core::{
-    DecisionModel, DevicePreference, LongContextOptions, MinConfidence, ModelManifest,
+    DecisionModel, DevicePreference, LongContextOptions, MinConfidence, ModelError, ModelManifest,
     ModelRegistry, ModelResolver, PredictionOptions, Questions, RegistryConfig,
 };
 use sys1_families::{
-    FamilyFactory, is_supported_directory, load_manifest, local_manifest, register_bundle,
+    BundleOptions, FamilyFactory, FamilyOptions, is_supported_directory, load_manifest,
+    local_manifest, register_bundle, resolve_bundle_overrides,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
@@ -255,6 +256,14 @@ fn main() -> anyhow::Result<()> {
             let reference = config.model_reference(&args.reference);
             let pulled = pull_model(&hub, &reference)?;
             println!("{} -> {}", pulled.manifest.name, pulled.directory.display());
+            let families = config.value.families.to_options();
+            let overrides =
+                resolve_bundle_overrides(&pulled.directory, &families, |base_reference| {
+                    pull_base(&hub, base_reference)
+                })?;
+            if let Some(base) = overrides.kev_base {
+                println!("base -> {}", base.display());
+            }
             Ok(())
         }
         Command::List => {
@@ -378,8 +387,9 @@ fn serve_command(
     } else {
         server.metrics.unwrap_or(true)
     };
+    let families = config.value.families.to_options();
     let hub = Arc::new(make_hub(cache, offline, max_cache_bytes, config)?);
-    let (manifests, factory) = build_models(&hub, &specs, options.clone())?;
+    let (manifests, factory) = build_models(&hub, &specs, options.clone(), &families)?;
     if manifests.is_empty() {
         if !enable_admin {
             bail!(
@@ -401,6 +411,7 @@ fn serve_command(
         hub.clone(),
         factory,
         options,
+        families,
         config.value.models.clone(),
     ));
     let cache_manager: Arc<dyn sys1_server::CacheManager> = Arc::new(HubCacheManager::new(hub));
@@ -551,6 +562,8 @@ fn run_command(
     )?;
     let reference = config.model_reference(&args.reference);
     let pulled = pull_model(&hub, &reference)?;
+    let families = config.value.families.to_options();
+    let bundle = bundle_for_directory(&hub, &pulled.directory, &families)?;
     let input = read_input(&args.input)?;
     let value: serde_json::Value =
         serde_json::from_str(&input).context("input must be a JSON object")?;
@@ -570,7 +583,7 @@ fn run_command(
     let questions = Questions::from(questions);
 
     let model: Arc<dyn DecisionModel> =
-        load_manifest(&pulled.manifest, &pulled.directory, &options)?;
+        load_manifest(&pulled.manifest, &pulled.directory, &options, &bundle)?;
     let prediction_options = PredictionOptions {
         min_confidence: args.min_confidence.map(MinConfidence::scalar).transpose()?,
     };
@@ -717,6 +730,11 @@ fn doctor_command(
         "  modelscope endpoint: {}",
         hub.config().modelscope_endpoint
     );
+    println!(
+        "  timeouts: request {}s, download attempt {}s",
+        hub.config().timeout.as_secs(),
+        hub.config().download_timeout.as_secs()
+    );
     println!("  offline: {}", hub.config().offline);
     Ok(())
 }
@@ -787,6 +805,11 @@ fn make_hub(
         && let Some(secs) = hub.timeout_secs
     {
         config.timeout = Duration::from_secs(secs.max(1));
+    }
+    if !env_set("SYS1_HUB_DOWNLOAD_TIMEOUT_SECS")
+        && let Some(secs) = hub.download_timeout_secs
+    {
+        config.download_timeout = Duration::from_secs(secs.max(1));
     }
     if let Some(limit) = max_cache_bytes {
         config.max_cache_bytes = (limit > 0).then_some(limit);
@@ -903,6 +926,7 @@ fn build_models(
     hub: &Hub,
     specs: &[String],
     options: ModelOptions,
+    families: &FamilyOptions,
 ) -> anyhow::Result<(Vec<ModelManifest>, Arc<FamilyFactory>)> {
     let factory = Arc::new(FamilyFactory::new());
     let mut manifests = Vec::new();
@@ -913,11 +937,22 @@ fn build_models(
             if !is_supported_directory(&pulled.directory) {
                 continue;
             }
+            let bundle = match bundle_for_directory(hub, &pulled.directory, families) {
+                Ok(bundle) => bundle,
+                Err(error) => {
+                    tracing::warn!(
+                        model = %pulled.manifest.name,
+                        "skipping cached model: {error:#}"
+                    );
+                    continue;
+                }
+            };
             let registered = register_bundle(
                 &factory,
                 &pulled.manifest,
                 &pulled.directory,
                 &options,
+                &bundle,
                 None,
             )?;
             for manifest in registered {
@@ -940,11 +975,13 @@ fn build_models(
                 "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
             );
         }
+        let bundle = bundle_for_directory(hub, &pulled.directory, families)?;
         let registered = register_bundle(
             &factory,
             &pulled.manifest,
             &pulled.directory,
             &options,
+            &bundle,
             Some(&name),
         )?;
         for manifest in registered {
@@ -974,6 +1011,28 @@ fn parse_model_spec(spec: &str) -> anyhow::Result<(String, String)> {
         bail!("expected NAME=REF, got {spec:?}");
     }
     Ok((name.to_owned(), reference.to_owned()))
+}
+
+fn bundle_for_directory(
+    hub: &Hub,
+    directory: &Path,
+    families: &FamilyOptions,
+) -> anyhow::Result<BundleOptions> {
+    let overrides = resolve_bundle_overrides(directory, families, |base_reference| {
+        pull_base(hub, base_reference)
+    })?;
+    Ok(BundleOptions {
+        families: families.clone(),
+        overrides,
+    })
+}
+
+pub(crate) fn pull_base(hub: &Hub, reference: &str) -> Result<PathBuf, ModelError> {
+    pull_model(hub, reference)
+        .map(|pulled| pulled.directory)
+        .map_err(|error| {
+            ModelError::load(format!("cannot resolve Kev base `{reference}`: {error:#}"))
+        })
 }
 
 fn pull_model(hub: &Hub, reference: &str) -> anyhow::Result<PulledModel> {

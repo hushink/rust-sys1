@@ -6,6 +6,11 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const USER_AGENT: &str = concat!("rust-sys1/", env!("CARGO_PKG_VERSION"));
+/// Full-content verification attempts before giving up.
+const MAX_ATTEMPTS: u8 = 4;
+/// Consecutive attempts that add no bytes before giving up. A timed-out
+/// attempt keeps its partial file, so large downloads resume across attempts.
+const MAX_STALLS: u8 = 3;
 
 /// Verify an existing file without treating a mismatch as an error.
 pub(crate) fn verify_file(
@@ -101,12 +106,14 @@ pub(crate) fn download_http(
         offset = 0;
     }
 
-    let mut attempt = 0_u8;
+    let mut attempts = 0_u8;
+    let mut stalls = 0_u8;
     loop {
-        attempt += 1;
+        let before = offset;
         let mut request = context
             .client
             .get(url)
+            .timeout(context.config.download_timeout)
             .header(reqwest::header::ACCEPT_ENCODING, "identity")
             .header(reqwest::header::USER_AGENT, USER_AGENT);
         for (name, value) in headers {
@@ -116,10 +123,19 @@ pub(crate) fn download_http(
             request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
         }
 
-        let response = request.send().map_err(|error| HubError::Http {
-            url: url.to_owned(),
-            message: error.to_string(),
-        })?;
+        let response = match request.send() {
+            Ok(response) => response,
+            Err(error) => {
+                stalls += 1;
+                if stalls >= MAX_STALLS {
+                    return Err(HubError::Http {
+                        url: url.to_owned(),
+                        message: error.to_string(),
+                    });
+                }
+                continue;
+            }
+        };
         let status = response.status();
 
         if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && offset > 0 {
@@ -130,7 +146,9 @@ pub(crate) fn download_http(
             }
             let _ = fs::remove_file(&partial);
             offset = 0;
-            if attempt < 2 {
+            stalls += 1;
+            if attempts < MAX_ATTEMPTS && stalls < MAX_STALLS {
+                attempts += 1;
                 continue;
             }
             return Err(HubError::HttpStatus {
@@ -166,7 +184,22 @@ pub(crate) fn download_http(
         };
 
         let mut reader = response;
-        std::io::copy(&mut reader, &mut file).map_err(|error| HubError::io(&partial, error))?;
+        if let Err(error) = std::io::copy(&mut reader, &mut file) {
+            drop(file);
+            let after = fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
+            offset = after;
+            if after > before {
+                stalls = 0;
+            } else {
+                stalls += 1;
+            }
+            if stalls >= MAX_STALLS {
+                return Err(HubError::io(&partial, error));
+            }
+            // Keep the partial file: the next attempt resumes with a range
+            // request from the bytes that did arrive.
+            continue;
+        }
         file.flush()
             .map_err(|error| HubError::io(&partial, error))?;
         drop(file);
@@ -180,7 +213,8 @@ pub(crate) fn download_http(
             Err(error) => {
                 let _ = fs::remove_file(&partial);
                 offset = 0;
-                if attempt >= 2 {
+                attempts += 1;
+                if attempts >= MAX_ATTEMPTS {
                     return Err(error);
                 }
             }

@@ -248,6 +248,8 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 # max_cache_bytes = 34359738368    # 省略或 0 = 不限制；pull 前按 LRU 淘汰
 # hf_endpoint = "https://huggingface.co"
 # modelscope_endpoint = "https://modelscope.cn"
+# timeout_secs = 60            # 元数据/连接超时
+# download_timeout_secs = 300  # 单次下载尝试；大文件按 Range 续传
 
 [server]
 # bind = "127.0.0.1:8080"
@@ -264,13 +266,32 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 # log_file = "logs/sys1.log"   # 追加到文件而非 stdout
 # cors_origins = ["https://app.example"]  # [] 关闭 CORS；省略为 permissive
 
+[families]
+# max_batch = 32                       # 编码器族：NLI/GLiClass/Von/Decima
+# [families.qwen3guard]
+# max_len = 32768
+# [families.von]
+# max_len = 8192
+# [families.clef]
+# max_len = 8192
+# [families.decima]
+# choice_fit = false                  # 覆盖 decima.json
+# [families.kev]
+# base_dir = "D:/models/qwen3.5-0.8b-base"
+# temperature = 2.351                 # 否则读取 kev.json / head.pt
+# [families.decision]
+# temperature = 1.0
+
 [models]
 laya-latest = "local:D:/models/laya"       # 本地模型目录
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+# kev = "hf:jaredpalmer/kev-0.8b"          # 同时拉取声明的 Qwen3.5 base
 ```
 
 配置文件中的相对路径按配置文件所在目录解析。`[models]` 中的名称可用于
-`serve`、`run`、`pull`、`show`、`rm`。凭据建议通过 `HF_TOKEN`、
+`serve`、`run`、`pull`、`show`、`rm`。Kev 会从 `base_dir`、相邻的 `base/`
+目录，或 `head.pt` / `adapter_config.json` 中记录的仓库解析 Qwen3.5 base；因此
+`hf:` 适配器会在首次使用时自动拉取 base。凭据建议通过 `HF_TOKEN`、
 `MODELSCOPE_API_TOKEN`、`SYS1_HUB_TOKEN` 环境变量提供。
 
 配置 `[hub] max_cache_bytes`（或 `--max-cache-bytes` /

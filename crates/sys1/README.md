@@ -88,8 +88,11 @@ contract and `onnx.json` options. `sys1::ort` re-exports the raw
 ## In-process engine
 
 - `EngineOptions` groups `hub` (cache, endpoints, credentials), `registry`
-  (LRU/keep-alive), and `model` (`ModelOptions`: device, dtype, context length,
-  confidence, attention).
+  (LRU/keep-alive), `model` (`ModelOptions`: device, dtype, context length,
+  confidence, attention), and `families` (`FamilyOptions`: encoder batch size,
+  per-family `max_len`, Decima `choice_fit`, Kev base/temperature, Decision
+  temperature). Kev adapters without a local base pull the repository declared
+  by `head.pt` / `adapter_config.json` through the engine's hub.
 - `InferenceEngine::new` starts empty; `from_reference` and `from_directory`
   register a model immediately.
 - `add` / `add_as` pull references through the hub, materialize the checkpoint,

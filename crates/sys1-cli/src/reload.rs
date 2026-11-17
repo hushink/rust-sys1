@@ -177,7 +177,7 @@ mod tests {
     use super::*;
     use std::fs;
     use sys1_core::RegistryConfig;
-    use sys1_families::FamilyFactory;
+    use sys1_families::{FamilyFactory, FamilyOptions};
     use sys1_hub::{Hub, HubConfig};
     use sys1_laya::LayaOptions as ModelOptions;
 
@@ -235,6 +235,7 @@ mod tests {
             hub,
             factory,
             ModelOptions::default(),
+            FamilyOptions::default(),
             loaded.value.models.clone(),
         ));
         let reloader = HubConfigReloader::new(

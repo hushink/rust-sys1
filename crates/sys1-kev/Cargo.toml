@@ -14,6 +14,7 @@ sys1-qwen = { path = "../sys1-qwen" }
 candle-core = { version = "0.11", default-features = false }
 candle-nn = { version = "0.11", default-features = false }
 tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
+zip = { version = "9", default-features = false }
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -3,8 +3,11 @@
 [English](README.md)
 
 基于 candle 的 Decima（`decima-late-interaction-v1`/`-v2`）。ModernBERT 编码器
-（`decima-base` 为 mmBERT）分别编码 state 和每个选项；late-interaction scorer
-让每个选项读取 state token 后得到一个原始分数。选项之间不互相注意。
+（`decima-base` 为 mmBERT）或 BERT 编码器（`decima-small` 为
+`multilingual-e5-small`）分别编码 state 和每个选项；late-interaction scorer
+让每个选项读取 state token 后得到一个原始分数。选项之间不互相注意。编码器架构
+由 `encoder/config.json` 的 `model_type = "bert"` 自动选择；BERT 默认使用
+`[CLS]`/`[SEP]` 0/2，配置可覆盖。
 
 ## 行
 
@@ -19,7 +22,9 @@ option 行  [cls] tok(option_prefix + normalize(text + " " + option))[..max_choi
   noul 为 `yes`/`no`。
 - `normalize` 为 NFC 后接 Python `str.strip()`。
 - state 行超过预算时报 `STATE_TRUNCATED`；option 行按上游行为静默截断。
-- `choice_fit`/`option_fit` checkpoint 在完整文本放不下时，把问题适配进选项窗口。
+- `choice_fit`/`option_fit` checkpoint 在完整文本放不下时，把问题适配进选项窗口；
+  `DecimaOptions::choice_fit`（CLI：`[families.decima] choice_fit`）可覆盖
+  `decima.json` 中的值。
 
 choice/noul 概率为 `softmax(scores / T)`；score 使用 Decima 的 cumulative-link
 ordinal head。

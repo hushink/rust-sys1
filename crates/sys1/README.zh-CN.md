@@ -84,8 +84,11 @@ let output = model.predict(
 
 ## 进程内引擎
 
-- `EngineOptions` 按 `hub`（缓存、端点、凭据）、`registry`（LRU/keep-alive）与
-  `model`（`ModelOptions`：device、dtype、上下文长度、confidence、attention）分组。
+- `EngineOptions` 按 `hub`（缓存、端点、凭据）、`registry`（LRU/keep-alive）、
+  `model`（`ModelOptions`：device、dtype、上下文长度、confidence、attention）与
+  `families`（`FamilyOptions`：编码器 batch、各模型族 `max_len`、Decima
+  `choice_fit`、Kev base/温度、Decision 温度）分组。没有本地 base 的 Kev adapter
+  会通过 engine 的 hub 拉取 `head.pt` / `adapter_config.json` 声明的仓库。
 - `InferenceEngine::new` 创建空目录；`from_reference` / `from_directory` 立即注册模型。
 - `add` / `add_as` 通过 hub 拉取引用、物化 checkpoint、注册后端并写入注册表。
   Laya 仓库根目录会注册 router 与各变体；其他 candle 模型族会按 checkpoint

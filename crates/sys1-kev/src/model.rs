@@ -150,6 +150,7 @@ impl KevModel {
         let temperature = options
             .temperature
             .or_else(|| read_temperature(&directory.join("kev.json")))
+            .or_else(|| crate::directory_metadata(directory).temperature)
             .unwrap_or(DEFAULT_TEMPERATURE);
         Ok(Self {
             tokenizer,

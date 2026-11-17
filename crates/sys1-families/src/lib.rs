@@ -14,7 +14,9 @@ use sys1_core::{DecisionModel, ModelError, ModelFactory, ModelFile, ModelManifes
 use sys1_decima::{DecimaFactory, DecimaModel, DecimaOptions, is_decima_directory};
 use sys1_decision::{DecisionFactory, DecisionOptions, is_decision_directory};
 use sys1_gliclass::{GliclassFactory, GliclassModel, GliclassOptions, is_gliclass_directory};
-use sys1_kev::{KevFactory, KevModel, KevOptions, is_kev_directory};
+use sys1_kev::{
+    KevFactory, KevModel, KevOptions, has_kev_base, is_kev_directory, resolve_base_directory,
+};
 use sys1_laya::{
     LayaFactory, LayaModel, LayaOptions, is_model_directory, register_checkpoint_bundle,
 };
@@ -23,6 +25,107 @@ use sys1_qwen3guard::{
     Qwen3GuardFactory, Qwen3GuardModel, Qwen3GuardOptions, is_qwen3guard_directory,
 };
 use sys1_von::{VonFactory, VonModel, VonOptions, is_von_directory};
+
+/// Context-length override shared by sentence-encoder families.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MaxLenOptions {
+    /// Truncate rows to this many tokens. Unset uses the server-wide
+    /// `max_len`, then the checkpoint default.
+    pub max_len: Option<usize>,
+}
+
+/// Decima-specific options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DecimaFamilyOptions {
+    /// Force the choice-fit augmentation on or off, overriding `decima.json`.
+    pub choice_fit: Option<bool>,
+}
+
+/// Kev-specific options.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct KevFamilyOptions {
+    /// Local Qwen3.5 base directory. When unset, the base beside the adapter,
+    /// under `base/`, or the repository declared in `head.pt` / `kev.json` is
+    /// used.
+    pub base_dir: Option<PathBuf>,
+    /// Pointer-logit temperature. When unset, `kev.json` and the calibrated
+    /// temperature recorded in `head.pt` are used.
+    pub temperature: Option<f32>,
+}
+
+/// Decision-specific options.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DecisionFamilyOptions {
+    /// Endpoint-logit temperature, overriding the checkpoint calibration.
+    pub temperature: Option<f32>,
+}
+
+/// Per-family configuration applied to every bundle registered by a factory.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FamilyOptions {
+    /// Cross-request batch size for the encoder families (default 32).
+    pub max_batch: Option<usize>,
+    /// Qwen3Guard row budget.
+    pub qwen3guard: MaxLenOptions,
+    /// Von row budget.
+    pub von: MaxLenOptions,
+    /// Clef row budget.
+    pub clef: MaxLenOptions,
+    pub decima: DecimaFamilyOptions,
+    pub kev: KevFamilyOptions,
+    pub decision: DecisionFamilyOptions,
+}
+
+impl FamilyOptions {
+    /// Batch size for encoder families.
+    pub fn batch_size(&self) -> usize {
+        self.max_batch.unwrap_or(32).max(1)
+    }
+}
+
+/// Per-bundle values discovered while resolving a reference.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BundleOverrides {
+    /// Qwen3.5 base materialized for a Kev adapter.
+    pub kev_base: Option<PathBuf>,
+}
+
+/// Global family options plus per-bundle overrides.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BundleOptions {
+    pub families: FamilyOptions,
+    pub overrides: BundleOverrides,
+}
+
+impl BundleOptions {
+    pub fn new(families: FamilyOptions) -> Self {
+        Self {
+            families,
+            overrides: BundleOverrides::default(),
+        }
+    }
+}
+
+/// Resolve family-specific extras a directory needs before registration.
+///
+/// Kev adapters may declare their Qwen3.5 base in `kev.json`, `head.pt`,
+/// `provenance.json`, or `adapter_config.json`; `pull` is called with that
+/// reference when the base is not already present.
+pub fn resolve_bundle_overrides<F>(
+    directory: &Path,
+    families: &FamilyOptions,
+    pull: F,
+) -> Result<BundleOverrides, ModelError>
+where
+    F: FnOnce(&str) -> Result<PathBuf, ModelError>,
+{
+    let mut overrides = BundleOverrides::default();
+    if is_kev_directory(directory) {
+        let base = resolve_base_directory(directory, families.kev.base_dir.as_deref(), pull)?;
+        overrides.kev_base = Some(base);
+    }
+    Ok(overrides)
+}
 
 /// Dispatch a manifest to the compiled model family.
 #[derive(Default)]
@@ -117,8 +220,12 @@ pub fn register_bundle(
     manifest: &ModelManifest,
     directory: &Path,
     options: &LayaOptions,
+    bundle: &BundleOptions,
     name: Option<&str>,
 ) -> Result<Vec<ModelManifest>, ModelError> {
+    let families = &bundle.families;
+    let batch = families.batch_size();
+    let max_len = |family: Option<usize>| family.or(options.max_len);
     if is_nli_directory(directory) {
         let manifest = rename(manifest.clone(), "nli", name);
         factory.nli.register(
@@ -128,7 +235,7 @@ pub fn register_bundle(
                 device: options.device.clone(),
                 dtype: options.dtype,
                 max_len: options.max_len,
-                max_batch: 32,
+                max_batch: batch,
             },
         );
         return Ok(vec![manifest]);
@@ -142,7 +249,7 @@ pub fn register_bundle(
                 device: options.device.clone(),
                 dtype: options.dtype,
                 max_len: options.max_len,
-                max_batch: 32,
+                max_batch: batch,
             },
         );
         return Ok(vec![manifest]);
@@ -155,7 +262,7 @@ pub fn register_bundle(
             Qwen3GuardOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_len: options.max_len,
+                max_len: max_len(families.qwen3guard.max_len),
             },
         );
         return Ok(vec![manifest]);
@@ -168,8 +275,8 @@ pub fn register_bundle(
             VonOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_len: options.max_len,
-                max_batch: 32,
+                max_len: max_len(families.von.max_len),
+                max_batch: batch,
             },
         );
         return Ok(vec![manifest]);
@@ -182,21 +289,34 @@ pub fn register_bundle(
             DecimaOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_batch: 32,
+                max_batch: batch,
+                choice_fit: families.decima.choice_fit,
             },
         );
         return Ok(vec![manifest]);
     }
     if is_kev_directory(directory) {
         let manifest = rename(manifest.clone(), "kev", name);
+        let base_directory = bundle
+            .overrides
+            .kev_base
+            .clone()
+            .or_else(|| families.kev.base_dir.clone());
+        if base_directory.is_none() && !has_kev_base(directory) {
+            return Err(ModelError::load(format!(
+                "{} is a Kev adapter but has no Qwen3.5 base; resolve its declared base, put \
+                 the base files in a `base/` subdirectory, or set [families.kev] base_dir",
+                directory.display()
+            )));
+        }
         factory.kev.register(
             &manifest.name,
             directory,
             KevOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                base_directory: None,
-                temperature: None,
+                base_directory,
+                temperature: families.kev.temperature,
             },
         );
         return Ok(vec![manifest]);
@@ -209,7 +329,7 @@ pub fn register_bundle(
             DecisionOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                temperature: None,
+                temperature: families.decision.temperature,
             },
         );
         return Ok(vec![manifest]);
@@ -222,7 +342,7 @@ pub fn register_bundle(
             ClefOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_len: options.max_len,
+                max_len: max_len(families.clef.max_len),
             },
         );
         return Ok(vec![manifest]);
@@ -230,8 +350,7 @@ pub fn register_bundle(
     if directory.join("adapter_model.safetensors").is_file() && directory.join("head.pt").is_file()
     {
         return Err(ModelError::load(format!(
-            "{} is a Kev adapter but has no Qwen3.5 base; put the base files in a `base/` \
-             subdirectory or set KevOptions::base_directory",
+            "{} is a Kev adapter but is missing adapter_config.json or tokenizer.json",
             directory.display()
         )));
     }
@@ -344,7 +463,11 @@ fn collect_files(
 pub fn load_directory(
     directory: &Path,
     options: &LayaOptions,
+    bundle: &BundleOptions,
 ) -> Result<Arc<dyn DecisionModel>, ModelError> {
+    let families = &bundle.families;
+    let batch = families.batch_size();
+    let max_len = |family: Option<usize>| family.or(options.max_len);
     if is_nli_directory(directory) {
         return Ok(Arc::new(NliModel::load_dir(
             directory,
@@ -352,7 +475,7 @@ pub fn load_directory(
                 device: options.device.clone(),
                 dtype: options.dtype,
                 max_len: options.max_len,
-                max_batch: 32,
+                max_batch: batch,
             },
         )?));
     }
@@ -363,7 +486,7 @@ pub fn load_directory(
                 device: options.device.clone(),
                 dtype: options.dtype,
                 max_len: options.max_len,
-                max_batch: 32,
+                max_batch: batch,
             },
         )?));
     }
@@ -373,7 +496,7 @@ pub fn load_directory(
             Qwen3GuardOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_len: options.max_len,
+                max_len: max_len(families.qwen3guard.max_len),
             },
         )?));
     }
@@ -383,8 +506,8 @@ pub fn load_directory(
             VonOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_len: options.max_len,
-                max_batch: 32,
+                max_len: max_len(families.von.max_len),
+                max_batch: batch,
             },
         )?));
     }
@@ -394,18 +517,31 @@ pub fn load_directory(
             DecimaOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_batch: 32,
+                max_batch: batch,
+                choice_fit: families.decima.choice_fit,
             },
         )?));
     }
     if is_kev_directory(directory) {
+        let base_directory = bundle
+            .overrides
+            .kev_base
+            .clone()
+            .or_else(|| families.kev.base_dir.clone());
+        if base_directory.is_none() && !has_kev_base(directory) {
+            return Err(ModelError::load(format!(
+                "{} is a Kev adapter but has no Qwen3.5 base; resolve its declared base, put \
+                 the base files in a `base/` subdirectory, or set [families.kev] base_dir",
+                directory.display()
+            )));
+        }
         return Ok(Arc::new(KevModel::load_dir(
             directory,
             KevOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                base_directory: None,
-                temperature: None,
+                base_directory,
+                temperature: families.kev.temperature,
             },
         )?));
     }
@@ -415,7 +551,7 @@ pub fn load_directory(
             DecisionOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                temperature: None,
+                temperature: families.decision.temperature,
             },
         )?));
     }
@@ -425,7 +561,7 @@ pub fn load_directory(
             ClefOptions {
                 device: options.device.clone(),
                 dtype: options.dtype,
-                max_len: options.max_len,
+                max_len: max_len(families.clef.max_len),
             },
         )?));
     }
@@ -452,6 +588,7 @@ pub fn load_manifest(
     manifest: &ModelManifest,
     directory: &Path,
     options: &LayaOptions,
+    bundle: &BundleOptions,
 ) -> Result<Arc<dyn DecisionModel>, ModelError> {
     if manifest.backend == "onnx" {
         #[cfg(feature = "onnx")]
@@ -468,5 +605,127 @@ pub fn load_manifest(
             ));
         }
     }
-    load_directory(directory, options)
+    load_directory(directory, options, bundle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn adapter(directory: &Path) {
+        fs::create_dir_all(directory).expect("adapter dir");
+        fs::write(directory.join("adapter_model.safetensors"), b"x").expect("adapter");
+        fs::write(directory.join("adapter_config.json"), b"{}").expect("adapter config");
+        fs::write(directory.join("head.pt"), b"x").expect("head");
+        fs::write(directory.join("tokenizer.json"), b"{}").expect("tokenizer");
+    }
+
+    fn base(directory: &Path) {
+        fs::create_dir_all(directory).expect("base dir");
+        fs::write(directory.join("config.json"), b"{}").expect("base config");
+        fs::write(directory.join("model.safetensors"), b"x").expect("base weights");
+    }
+
+    #[test]
+    fn resolves_a_base_declared_by_the_adapter_config() {
+        let root = std::env::temp_dir().join(format!("sys1-families-kev-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let adapter_dir = root.join("adapter");
+        let base_dir = root.join("base-model");
+        adapter(&adapter_dir);
+        base(&base_dir);
+        fs::write(
+            adapter_dir.join("adapter_config.json"),
+            serde_json::json!({
+                "base_model_name_or_path": base_dir.display().to_string(),
+            })
+            .to_string(),
+        )
+        .expect("adapter config");
+
+        let overrides =
+            resolve_bundle_overrides(&adapter_dir, &FamilyOptions::default(), |reference| {
+                panic!("local base must not be pulled, got {reference}")
+            })
+            .expect("overrides");
+        assert_eq!(overrides.kev_base.as_deref(), Some(base_dir.as_path()));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn pulls_a_declared_hf_base_with_its_revision() {
+        let root =
+            std::env::temp_dir().join(format!("sys1-families-kev-pull-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let adapter_dir = root.join("adapter");
+        let base_dir = root.join("base-model");
+        adapter(&adapter_dir);
+        base(&base_dir);
+        fs::write(
+            adapter_dir.join("kev.json"),
+            serde_json::json!({
+                "base": "Qwen/Qwen3.5-4B-Base",
+                "base_revision": "abc123",
+            })
+            .to_string(),
+        )
+        .expect("kev.json");
+
+        let mut requested = String::new();
+        let overrides =
+            resolve_bundle_overrides(&adapter_dir, &FamilyOptions::default(), |reference| {
+                requested = reference.to_owned();
+                Ok(base_dir.clone())
+            })
+            .expect("overrides");
+        assert_eq!(requested, "hf:Qwen/Qwen3.5-4B-Base@abc123");
+        assert_eq!(overrides.kev_base.as_deref(), Some(base_dir.as_path()));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn configured_base_wins_over_the_declaration() {
+        let root =
+            std::env::temp_dir().join(format!("sys1-families-kev-config-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let adapter_dir = root.join("adapter");
+        let configured = root.join("configured");
+        let declared = root.join("declared");
+        adapter(&adapter_dir);
+        base(&configured);
+        base(&declared);
+        fs::write(
+            adapter_dir.join("kev.json"),
+            serde_json::json!({ "base": declared.display().to_string() }).to_string(),
+        )
+        .expect("kev.json");
+
+        let families = FamilyOptions {
+            kev: KevFamilyOptions {
+                base_dir: Some(configured.clone()),
+                temperature: Some(2.0),
+            },
+            ..FamilyOptions::default()
+        };
+        let overrides = resolve_bundle_overrides(&adapter_dir, &families, |reference| {
+            panic!("configured base must not be pulled, got {reference}")
+        })
+        .expect("overrides");
+        assert_eq!(overrides.kev_base.as_deref(), Some(configured.as_path()));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn kev_detection_accepts_a_base_less_adapter() {
+        let root =
+            std::env::temp_dir().join(format!("sys1-families-kev-detect-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        adapter(&root);
+        assert!(is_kev_directory(&root));
+        assert!(!has_kev_base(&root));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }

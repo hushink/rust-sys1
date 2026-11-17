@@ -12,7 +12,11 @@ cache_dir = "D:/models/sys1-cache"
 # offline = false
 # hf_endpoint = "https://huggingface.co"
 # modelscope_endpoint = "https://modelscope.cn"
+# Metadata/connection timeout.
 # timeout_secs = 60
+# Per-attempt download timeout. Large files resume with HTTP ranges, so this
+# bounds stalls rather than the total transfer time.
+# download_timeout_secs = 300
 # Prefer HF_TOKEN / MODELSCOPE_API_TOKEN / SYS1_HUB_TOKEN environment variables
 # for credentials; these fields are available for self-contained deployments.
 # hf_token = "..."
@@ -43,6 +47,36 @@ cache_dir = "D:/models/sys1-cache"
 # log_file = "sys1.log"        # append to a file instead of stdout
 # cors_origins = ["https://app.example"]  # [] disables CORS; omit = permissive
 
+# Per-family overrides. Encoder families fall back to [server] max_len.
+[families]
+# Cross-request batch size for NLI/GLiClass/Von/Decima (default 32).
+# max_batch = 32
+
+# [families.qwen3guard]
+# max_len = 32768
+
+# [families.von]
+# max_len = 8192
+
+# [families.clef]
+# max_len = 8192
+
+# [families.decima]
+# Override `choice_fit` from decima.json.
+# choice_fit = false
+
+# [families.kev]
+# Qwen3.5 base directory. Relative paths resolve from this file. When unset,
+# the base beside the adapter, under base/, or the repository declared in
+# head.pt / adapter_config.json is used (and pulled on demand).
+# base_dir = "D:/models/qwen3.5-0.8b-base"
+# Override the calibrated pointer temperature (kev.json / head.pt otherwise).
+# temperature = 2.351
+
+# [families.decision]
+# Override the endpoint temperature from the checkpoint calibration.
+# temperature = 1.0
+
 # Serving model catalog. Keys are the names clients pass to /v1/systemone.
 # Values are ModelRefs: local:/path, hf:owner/repo, modelscope:..., or a
 # manifest URL. The same names work with `sys1 run`, `pull`, `show`, and `rm`.
@@ -66,5 +100,6 @@ laya-latest = "local:D:/models/laya"
 # decima = "hf:amyrmahdy/decima-base"
 # decision = "hf:vllm-sr/Decision-1.0-Eos-0.8B"
 # clef = "hf:Cloudflare/clef-flash"
-# Kev needs its Qwen3.5 base beside the adapter or under base/:
-# kev = "local:D:/models/kev-0.8b"
+# Kev pulls the Qwen3.5 base declared by the adapter when it is not present
+# beside the adapter or under base/:
+# kev = "hf:jaredpalmer/kev-0.8b"
