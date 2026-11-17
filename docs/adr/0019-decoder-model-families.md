@@ -40,4 +40,6 @@ Qwen3.5 在单 chunk 与 130-token 多 chunk 行上与 transformers 对齐；
 Qwen3Guard、Von、Decima、Kev、Decision 的 Python 参考输出均在 1e-3 内。
 Clef 9B 已在开发机上以 CPU + BF16 加载真实 `clef-flash` checkpoint：四个
 shard 的 SHA256 与 Hugging Face 一致，triage 请求的决策与 Ollaya 记录的
-integration corpus 相同（单次推理约 51 s）；12 GB 显存放不下 BF16 主干。
+integration corpus 相同（单次推理约 52 s）；12 GB 显存放不下 BF16 主干。
+另外，Qwen3.5 的深度卷积从通用 `conv1d` 换成 4-tap 移位乘加后，Kev CUDA
+单请求从 4.38 s 降到 54 ms，Decision 从 4.40 s 降到 77 ms。

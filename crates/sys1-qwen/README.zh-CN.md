@@ -11,6 +11,8 @@ rust-sys1 多个模型族共用的 Candle Qwen3 / Qwen3.5 解码器骨干。只�
 - **Qwen3.5**：Gated DeltaNet 层（depthwise 因果卷积、分块 gated delta rule、
   gated RMSNorm）与带 output gate、部分 RoPE 的 full-attention 层交替，后接
   SwiGLU。输入长度任意：内部右填充到 64 token 的整数倍，计算后切回原长度。
+  3–4 tap 的 depthwise 卷积用移位乘加实现；candle 通用 `conv1d` 在这种形状下
+  的 CUDA 性能约慢两个数量级。
 
 ```rust
 use candle_core::{DType, Device};

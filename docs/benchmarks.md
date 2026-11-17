@@ -53,13 +53,13 @@ Qwen3.5 混合模型。
 | Decima-base | CUDA | 36.6 | 122.0 | 444.0 | 17.5 |
 | Qwen3Guard 0.6B | CPU | 1677.2 | 3164.8 | 7530.5 | 1.05 |
 | Qwen3Guard 0.6B | CUDA | 95.3 | 179.1 | 659.8 | 11.7 |
-| Kev 0.8B | CPU | 785.5 | 2313.7 | — | — |
-| Kev 0.8B | CUDA | 4379.2 | 12926.6 | — | — |
-| Decision 0.8B | CPU | 1463.6 | 4661.8 | 4937.8 | 1.56 |
-| Decision 0.8B | CUDA | 4403.7 | 12948.6 | — | — |
+| Kev 0.8B | CPU | 585.0 | 1627.6 | — | — |
+| Kev 0.8B | CUDA | 54.2 | 148.6 | 573.4 | 13.4 |
+| Decision 0.8B | CPU | 1124.3 | 3287.9 | 4937.8 | 1.56 |
+| Decision 0.8B | CUDA | 76.7 | 215.0 | 665.4 | 11.7 |
 
-Kev/Decision 的 CUDA 并发场景未跑完：单请求已达 4.4 s，x8 场景会持续数分钟，
-因此只记录 `--no-concurrent` 的数字。
+Kev/Decision 的 CUDA 数字是深度卷积优化后的结果（见下节）。优化前分别为
+4379 ms / 4404 ms，x8 场景无法在合理时间内跑完。
 
 ## 选项数量扫描
 
@@ -102,16 +102,17 @@ scorer 前向，长度不同则保持独立，避免 padding 改变编码器的�
   CUDA 18.7 ms）；8 路并发时 NLI/GLiClass/Decima-small 的 CPU 吞吐反而更高，
   Von 与 Decima-base 仍是 CUDA 更好。部署时应按模型和并发度实测选择。
 - **Qwen3Guard（dense Qwen3）**：GPU 收益最大，单请求 1.68 s → 95 ms。
-- **Kev / Decision（Qwen3.5 hybrid）**：CUDA 单请求 4.4 s，比 CPU 的
-  0.79 s / 1.46 s 慢约 3–5 倍。原因是 Gated DeltaNet 目前按 chunk 用普通
-  张量算子实现，GPU 上每次前向需要大量小 kernel 启动与主机侧同步；TF32
-  没有改善（4.35 s vs 4.40 s）。在引入 fused delta-rule kernel 之前，这两族
-  在短请求上建议使用 CPU，或在 GPU 上批量合并更大的请求以摊薄开销。
+- **Kev / Decision（Qwen3.5 hybrid）**：优化前 CUDA 单请求 4.4 s，比 CPU 慢
+  3–5 倍。逐层剖析显示 18 个 DeltaNet 层的通用 `conv1d` 每次约 254 ms，
+  占整个前向的 98%；把它换成 4-tap 的 depthwise 移位乘加后，每层降到
+  0.36 ms。Kev CUDA 4.38 s → **54 ms**（约 80×），Decision 4.40 s →
+  **77 ms**（约 57×），CPU 也分别从 785/1464 ms 降到 585/1124 ms。
+  现在 Qwen3.5 家族在 CUDA 上比 CPU 快 10–15 倍。
 - **F16**：CUDA F16 路径在 NLI/Von/GLiClass 上暴露过 dtype 与 contiguous
   问题，已修复（mask 转 dtype、encoder/scorer 输入 contiguous）。修复后
   单请求 `noul` p50：NLI 15.7 ms、GLiClass 9.5 ms、Von 22.4 ms、
-  Decima-small 15.7 ms、Qwen3Guard 89.3 ms，均优于同模型 F32；Kev/Decision
-  仍约 4.4 s，说明瓶颈是 Qwen3.5 的主机侧调度而不是数值格式。
+  Decima-small 15.7 ms、Qwen3Guard 89.3 ms，均优于同模型 F32。卷积优化后
+  Kev F16 为 43.2 ms、Decision F16 为 61.3 ms，比 F32 再快约 20%。
 - **Clef 9B**：权重约 18.8 GB，超出 12 GiB 显存；CPU F32 需要约 36 GB 内存。
   使用 BF16 CPU 的验证结果见下一节（下载/验证完成后更新）。
 
@@ -130,7 +131,7 @@ cargo test --release -p sys1-clef --test clef matches_the_recorded_triage_decisi
 结果：
 
 - 加载约 20 s，峰值工作集约 18–19 GB。
-- 单次 triage 请求（5 个问题）`predict` 耗时 **50.9 s**（CPU BF16）。
+- 单次 triage 请求（5 个问题）`predict` 耗时 **52.1 s**（CPU BF16，复测）。
 - 决策与 Ollaya 记录的 `clef-flash-fp16` integration corpus 一致：
   `team=billing`、`refund/urgent/churn=true`、`upset` 的 argmax 为第 4 档
   （索引 3）。

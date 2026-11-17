@@ -14,7 +14,9 @@ families read option positions and apply their own heads.
   causal conv, chunked gated delta rule, gated RMSNorm) and gated
   full-attention layers with partial RoPE, followed by SwiGLU. Rows may have
   any length: the backbone right-pads to 64-token chunks internally and slices
-  the result back.
+  the result back. The 3–4 tap depthwise convolution is evaluated as shifted
+  multiplies; candle's generic `conv1d` is roughly two orders of magnitude
+  slower on CUDA for this shape.
 
 ```rust
 use candle_core::{DType, Device};

@@ -155,13 +155,8 @@ impl DeltaNet {
         let device = xs.device();
         let key_width = self.key_heads * self.key_dim;
         let value_width = self.value_heads * self.value_dim;
-        let conv_dim = 2 * key_width + value_width;
-        let mixed = self
-            .qkv
-            .forward(xs)?
-            .transpose(1, 2)?
-            .conv1d(&self.conv, self.kernel - 1, 1, 1, conv_dim)?
-            .narrow(2, 0, seq)?
+        let projected = self.qkv.forward(xs)?;
+        let mixed = depthwise_conv1d(&projected.transpose(1, 2)?, &self.conv, self.kernel)?
             .transpose(1, 2)?
             .silu()?;
 
@@ -403,6 +398,28 @@ struct Layer {
     mlp: Mlp,
 }
 
+/// Causal depthwise convolution over `[batch, channels, length]`.
+///
+/// Candle's generic `conv1d` is very slow on CUDA for this shape; the kernel is
+/// at most 4 taps, so shifted multiplies are both simpler and much faster.
+fn depthwise_conv1d(xs: &Tensor, weight: &Tensor, kernel: usize) -> Result<Tensor> {
+    let (batch, channels, length) = xs.dims3()?;
+    let coefficient =
+        |tap: usize| -> Result<Tensor> { weight.narrow(2, tap, 1)?.reshape((1, channels, 1)) };
+    if kernel <= 1 {
+        return xs.broadcast_mul(&coefficient(0)?);
+    }
+    let padding = Tensor::zeros((batch, channels, kernel - 1), xs.dtype(), xs.device())?;
+    let padded = Tensor::cat(&[&padding, xs], 2)?;
+    let mut output = Tensor::zeros((batch, channels, length), xs.dtype(), xs.device())?;
+    for tap in 0..kernel {
+        let shifted = padded.narrow(2, tap, length)?;
+        let term = shifted.broadcast_mul(&coefficient(tap)?)?;
+        output = output.add(&term)?;
+    }
+    Ok(output)
+}
+
 /// The hybrid Qwen3.5 decoder: Gated DeltaNet and gated full-attention layers.
 fn mm(lhs: &Tensor, rhs: &Tensor) -> Result<Tensor> {
     let lhs_shape = lhs.dims().to_vec();
@@ -579,5 +596,14 @@ mod tests {
         assert_eq!(lower[1][0], 1.0);
         assert_eq!(lower[0][1], 0.0);
         assert_eq!(masks.doubling.len(), 6);
+    }
+
+    #[test]
+    fn causal_depthwise_conv_shifts_its_taps() {
+        let xs = Tensor::new(&[[[1f32, 2.0, 3.0, 4.0]]], &Device::Cpu).unwrap();
+        let weight = Tensor::new(&[[[1f32, 10.0, 100.0]]], &Device::Cpu).unwrap();
+        let output = depthwise_conv1d(&xs, &weight, 3).unwrap();
+        let values = output.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+        assert_eq!(values, vec![100.0, 210.0, 321.0, 432.0]);
     }
 }
