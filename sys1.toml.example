@@ -48,6 +48,7 @@ cache_dir = "D:/models/sys1-cache"
 # cors_origins = ["https://app.example"]  # [] disables CORS; omit = permissive
 
 # Per-family overrides. Encoder families fall back to [server] max_len.
+# Changes require a restart; /api/config/reload only applies [models].
 [families]
 # Cross-request batch size for NLI/GLiClass/Von/Decima (default 32).
 # max_batch = 32

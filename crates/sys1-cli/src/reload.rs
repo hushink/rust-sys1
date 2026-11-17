@@ -69,6 +69,9 @@ impl ConfigReloader for HubConfigReloader {
         if new.server != old.server {
             restart.push("server settings changed".to_owned());
         }
+        if new.families != old.families {
+            restart.push("family settings changed".to_owned());
+        }
         let changed_models = new
             .models
             .iter()
@@ -306,6 +309,33 @@ mod tests {
                 .iter()
                 .any(|file| file.path == "model.safetensors")
         );
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn family_changes_require_restart() {
+        let (root, registry, _resolver, reloader) = setup("families");
+        let checkpoint_dir = root.join("checkpoint");
+
+        write_config(
+            &root.join("sys1.toml"),
+            Some(&checkpoint_dir),
+            "[families.decima]\nchoice_fit = true\n",
+        );
+        let error = reloader.reload().expect_err("family change");
+        match error {
+            ReloadError::RestartRequired(changes) => {
+                assert!(
+                    changes
+                        .iter()
+                        .any(|change| change.contains("family settings")),
+                    "{changes:?}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        assert!(registry.manifests().is_empty());
 
         fs::remove_dir_all(root).expect("cleanup");
     }

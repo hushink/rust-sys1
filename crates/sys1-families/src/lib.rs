@@ -26,6 +26,8 @@ use sys1_qwen3guard::{
 };
 use sys1_von::{VonFactory, VonModel, VonOptions, is_von_directory};
 
+pub use sys1_kev::{declared_base_reference as kev_base_reference, is_kev_adapter};
+
 /// Context-length override shared by sentence-encoder families.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaxLenOptions {
@@ -716,6 +718,27 @@ mod tests {
         assert_eq!(overrides.kev_base.as_deref(), Some(configured.as_path()));
 
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn family_batch_size_has_a_minimum_of_one() {
+        assert_eq!(FamilyOptions::default().batch_size(), 32);
+        assert_eq!(
+            FamilyOptions {
+                max_batch: Some(64),
+                ..FamilyOptions::default()
+            }
+            .batch_size(),
+            64
+        );
+        assert_eq!(
+            FamilyOptions {
+                max_batch: Some(0),
+                ..FamilyOptions::default()
+            }
+            .batch_size(),
+            1
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod model;
 
 pub use factory::{KevFactory, has_kev_base, is_kev_adapter, is_kev_directory};
 pub use metadata::{
-    KevHeadMetadata, directory_metadata, local_base, read_head_metadata, resolve_base_directory,
+    KevHeadMetadata, declared_base_reference, directory_metadata, local_base, read_head_metadata,
+    resolve_base_directory,
 };
 pub use model::{KevModel, KevOptions};

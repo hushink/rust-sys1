@@ -248,6 +248,13 @@ fn adapter_declaration(path: &Path) -> Option<(String, Option<String>)> {
     Some((base, revision))
 }
 
+/// The base reference declared by a Kev adapter, without resolving or pulling
+/// it. Returns `None` when the adapter has no usable declaration.
+pub fn declared_base_reference(directory: &Path) -> Option<String> {
+    let (base, revision) = base_declaration(directory)?;
+    normalize_base_reference(&base, revision.as_deref())
+}
+
 /// Resolve the Qwen3.5 base directory for a Kev adapter.
 ///
 /// Resolution order:

@@ -24,8 +24,8 @@ use sys1_core::{
     ModelRegistry, ModelResolver, PredictionOptions, Questions, RegistryConfig,
 };
 use sys1_families::{
-    BundleOptions, FamilyFactory, FamilyOptions, is_supported_directory, load_manifest,
-    local_manifest, register_bundle, resolve_bundle_overrides,
+    BundleOptions, FamilyFactory, FamilyOptions, is_kev_adapter, is_supported_directory,
+    kev_base_reference, load_manifest, local_manifest, register_bundle, resolve_bundle_overrides,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
@@ -306,10 +306,23 @@ fn main() -> anyhow::Result<()> {
             let hub = make_hub(cache.as_deref(), offline, max_cache_bytes, &config)?;
             let reference = config.model_reference(&args.reference);
             let location = hub.cache_location(&reference)?;
+            let base = kev_base_hint(&hub, &location);
             if hub.remove(&reference)? {
                 println!("removed {}", location.display());
             } else {
                 println!("not cached: {}", location.display());
+            }
+            if let Some((base_reference, base_location)) = base {
+                match base_location {
+                    Some(path) if base_reference.starts_with("local:") => {
+                        println!("base: {} (outside the hub cache)", path.display());
+                    }
+                    Some(path) => println!(
+                        "base kept: {} (remove with `sys1 rm {base_reference}`)",
+                        path.display()
+                    ),
+                    None => println!("base declared as {base_reference}"),
+                }
             }
             Ok(())
         }
@@ -1025,6 +1038,20 @@ fn bundle_for_directory(
         families: families.clone(),
         overrides,
     })
+}
+
+fn kev_base_hint(hub: &Hub, directory: &Path) -> Option<(String, Option<PathBuf>)> {
+    if !is_kev_adapter(directory) {
+        return None;
+    }
+    let reference = kev_base_reference(directory)?;
+    let parsed: ModelRef = reference.parse().ok()?;
+    let location = if parsed.scheme == "local" {
+        Some(PathBuf::from(&parsed.location))
+    } else {
+        hub.cache_location(&reference).ok()
+    };
+    Some((reference, location))
 }
 
 pub(crate) fn pull_base(hub: &Hub, reference: &str) -> Result<PathBuf, ModelError> {
