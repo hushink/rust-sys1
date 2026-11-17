@@ -12,7 +12,7 @@ layout, calibration, and answer formatting.
 use sys1_ort::{ScoringInputs, ScoringSession, SessionConfig};
 
 let session = ScoringSession::load(SessionConfig::new("model.onnx"))?;
-let logits = session.score(ScoringInputs {
+let outputs = session.score(ScoringInputs {
     input_ids: &[1, 2, 3, 4],
     attention_mask: &[1, 1, 1, 1],
     type_ids: &[0],
@@ -20,12 +20,19 @@ let logits = session.score(ScoringInputs {
     batch: 1,
     seq: 4,
 })?;
-assert_eq!(logits.len(), 2);
+assert_eq!(outputs.logits.len(), 2);
+
+// Optional [batch, hidden] pooled output for an act head:
+let mut config = SessionConfig::new("model.onnx");
+config.pooled_output = Some("pooled".to_owned());
+let outputs = ScoringSession::load(config)?.score(/* ... */)?;
 ```
 
 `SessionConfig` can override every input/output name and set intra-op/inter-op
 thread counts. `ScoringInputs::validate` rejects shape mismatches and marker
-indexes outside `0..batch * seq` before the runtime is called.
+indexes outside `0..batch * seq` before the runtime is called. When
+`pooled_output` is set, `ScoringOutputs::pooled` contains the flattened
+`[batch, hidden]` tensor; the element count must be divisible by `batch`.
 
 ## Contract
 
@@ -37,8 +44,9 @@ indexes outside `0..batch * seq` before the runtime is called.
 | `markers` | int64 | `[n]` |
 
 `markers` are flattened positions into `[batch * seq]`. The model gathers the
-hidden state at each marker and returns float32 `logits` with shape `[n]`.
-Batch and sequence axes must be dynamic. `Session::run` takes `&mut self`, so
+hidden state at each marker and returns float32 `logits` with shape `[n]`. It
+may additionally expose float32 `pooled` with shape `[batch, hidden]`, which a
+model family can use for an act head. Batch and sequence axes must be dynamic. `Session::run` takes `&mut self`, so
 `ScoringSession` serializes concurrent runs behind a mutex; ONNX Runtime
 parallelizes each run internally.
 

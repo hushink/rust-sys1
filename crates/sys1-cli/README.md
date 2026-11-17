@@ -33,7 +33,8 @@ sys1 run local:/path/to/laya-multilingual --input request.json
 
 The CLI enables the `onnx` feature by default. A directory containing
 `model.onnx` (or an `onnx.json` sidecar naming another file),
-`rl_agent_config.json`, and a tokenizer is detected as an ONNX Laya export:
+`rl_agent_config.json`, a tokenizer, and optionally `act_head.safetensors` is
+detected as an ONNX Laya export:
 
 ```bash
 sys1 serve --model laya-onnx=local:/path/to/laya-onnx
@@ -45,6 +46,8 @@ the `onnxruntime` shared library, or install it on the platform loader path.
 Use a current ONNX Runtime for multi-gigabyte exports. The graph input/output
 contract, optional `onnx.json` fields, and the pure NumPy exporter are
 documented in [`sys1-laya`](../sys1-laya/README.md#onnx-runtime-backend).
+Exports with an act-head sidecar also produce `action.act_probability`, matching
+the candle backend.
 The CLI `pull`/`show` paths also accept ONNX manifests
 (`backend = "onnx"`, `format = "onnx"`).
 
@@ -298,11 +301,13 @@ scored. A state that fits one window takes the ordinary single-call path.
 `--stride` must not exceed the effective window; `--long-batch` bounds windows
 per forward pass.
 
-With `--min-confidence`, each answer gains `abstention` (`passed`,
-`abstained`, or `unevaluated`) and `abstention_threshold`; `low_confidence:
-true` appears only on abstained answers. The gate compares the largest answer
-probability, not the reported confidence, and is not supported with `--long`.
-The typed API additionally accepts per-bucket threshold maps.
+When the checkpoint or ONNX export has an act head, each answer gains
+`"action": {"act_probability": ...}`. With `--min-confidence`, each answer also
+gains `abstention` (`passed`, `abstained`, or `unevaluated`) and
+`abstention_threshold`; `low_confidence: true` appears only on abstained
+answers. The gate compares the largest answer probability, not the reported
+confidence, and is not supported with `--long`. The typed API additionally
+accepts per-bucket threshold maps.
 
 ## Benchmark
 

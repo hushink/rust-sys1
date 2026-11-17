@@ -68,9 +68,9 @@ rl_agent_config.json
 tokenizer/tokenizer.json
 ```
 
-ONNX 导出则提供 `model.onnx`（或 `onnx.json` 指定的文件）、`rl_agent_config.json`
-与 tokenizer。可用纯 NumPy/ONNX 导出器（不依赖 PyTorch）生成，并对官方 golden
-logits 做校验：
+ONNX 导出则提供 `model.onnx`（或 `onnx.json` 指定的文件）、`rl_agent_config.json`、
+tokenizer，以及可选的 `act_head.safetensors`。可用纯 NumPy/ONNX 导出器（不依赖
+PyTorch）生成，并对官方 golden logits 做校验：
 
 ```bash
 uv run --with onnx --with safetensors --with numpy --python 3.13 \
@@ -82,7 +82,8 @@ uv run --with onnxruntime --with numpy --python 3.13 \
 ```
 
 三个 checkpoint 均与官方 golden logits 对齐，最大 `|ONNX - golden|` 在
-1.7e-6 到 2.5e-6 之间。计算图契约见
+1.7e-6 到 2.5e-6 之间。导出器同时生成 `pooled` 输出并复制 act head，因此 ONNX
+后端的 actions 与 candle 在 2e-3 内一致。计算图契约见
 [`sys1-laya` ONNX 后端](crates/sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
 多 GB 计算图请使用较新的 ONNX Runtime；Windows 上 1.17 加载 1.2 GiB
 multilingual 导出不稳定，1.32 正常。
@@ -583,7 +584,6 @@ cargo test -p sys1-laya --test abstention -- --ignored --nocapture
   构建在 CUDA 13.4/Windows 上还遇到 `cicc` access violation。数值对齐前不合并。
 - CPU int8 量化 / MKL。用 candle `Q8_0` 对代表性 2304×768×1024 层做 GEMM 探测只比
   F32 快约 6%，`Q4_0` 更慢，因此未集成；MKL crate 不在离线缓存中。
-- ONNX 导出暂不包含 Laya 的 act head；该后端 `actions` 为空。
 - Laya 权重再分发前需确认许可证；仓库不包含权重。
 
 ## 文档

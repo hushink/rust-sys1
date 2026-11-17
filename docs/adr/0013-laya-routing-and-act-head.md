@@ -8,4 +8,4 @@ checkpoint 若包含 `act_head.*`，`LayaModel` 在打分后计算 `action.act_p
 
 **取舍**：路由行为以官方 golden 为准（159/159 用例的 model、workflow、reason 与 detection 字段全部一致），而不是按“看起来合理”重写。`actions` 是显式扩展，序列化官方响应时会丢弃，避免协议漂移。act head 只在权重实际存在时启用，缺少张量的 checkpoint 保持原行为。
 
-**后果**：使用 ONNX 后端的调用方拿不到 `actions`，需要动作概率时应使用 candle checkpoint；后续给导出器增加 pooled 输出与 head 参数后，可在不改 wire 协议的前提下补齐。路由 golden 与真实 checkpoint 的 act head 对齐都需要本地官方 vectors，分别由 `SYS1_LAYA_ROUTING_GOLDEN` 与 `SYS1_LAYA_TEST_ROOT` / `SYS1_LAYA_GOLDEN_DIR` 驱动，默认跳过。
+**后果**：使用 ONNX 后端的调用方最初拿不到 `actions`；ADR 0016 通过 pooled 输出与 `act_head.safetensors` sidecar 补齐，修改 wire 协议不是必要条件。路由 golden 与真实 checkpoint 的 act head 对齐都需要本地官方 vectors，分别由 `SYS1_LAYA_ROUTING_GOLDEN` 与 `SYS1_LAYA_TEST_ROOT` / `SYS1_LAYA_GOLDEN_DIR` 驱动，默认跳过。

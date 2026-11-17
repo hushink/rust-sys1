@@ -107,4 +107,16 @@ fn candle_and_onnx_models_produce_the_same_answers() {
         "input token count"
     );
     compare_answers(&candle_output.answers, &onnx_output.answers);
+    for (id, _) in candle_output.answers.iter() {
+        let expected = candle_output
+            .action(id)
+            .unwrap_or_else(|| panic!("candle produced no action for {id}"));
+        let actual = onnx_output
+            .action(id)
+            .unwrap_or_else(|| panic!("ONNX produced no action for {id}"));
+        assert!(
+            (actual - expected).abs() <= 2e-3,
+            "{id}.action: expected {expected}, got {actual}"
+        );
+    }
 }

@@ -15,6 +15,9 @@ pub const DEFAULT_TYPE_IDS: &str = "type_ids";
 pub const DEFAULT_MARKERS: &str = "markers";
 /// Default name of the float32 logits output.
 pub const DEFAULT_OUTPUT: &str = "logits";
+/// Conventional name of the optional `[batch, hidden]` pooled output used by
+/// act heads.
+pub const DEFAULT_POOLED_OUTPUT: &str = "pooled";
 
 const DEFAULT_DYLIB: &str = if cfg!(target_os = "windows") {
     "onnxruntime.dll"
@@ -81,6 +84,9 @@ pub struct SessionConfig {
     pub markers: String,
     /// Logits output name.
     pub output: String,
+    /// Optional `[batch, hidden]` pooled-output name. When set, the session
+    /// returns it in [`ScoringOutputs::pooled`].
+    pub pooled_output: Option<String>,
     /// ONNX Runtime intra-op threads. `None` or `0` keeps the runtime default.
     pub intra_threads: Option<usize>,
     /// ONNX Runtime inter-op threads. `None` or `0` keeps the runtime default.
@@ -97,6 +103,7 @@ impl SessionConfig {
             type_ids: DEFAULT_TYPE_IDS.to_owned(),
             markers: DEFAULT_MARKERS.to_owned(),
             output: DEFAULT_OUTPUT.to_owned(),
+            pooled_output: None,
             intra_threads: None,
             inter_threads: None,
         }
@@ -160,6 +167,16 @@ impl ScoringInputs<'_> {
     }
 }
 
+/// Outputs produced by one scoring run.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScoringOutputs {
+    /// One logit per marker.
+    pub logits: Vec<f32>,
+    /// Flattened `[batch, hidden]` pooled representations, when the session
+    /// was configured with a pooled output.
+    pub pooled: Option<Vec<f32>>,
+}
+
 /// A loaded ONNX Runtime session for the System One scoring contract.
 ///
 /// `Session::run` takes `&mut self`, so the session is wrapped in a mutex.
@@ -186,6 +203,9 @@ impl ScoringSession {
             if value.is_empty() {
                 return Err(OrtError::input(format!("{label} name must not be empty")));
             }
+        }
+        if config.pooled_output.as_deref().is_some_and(str::is_empty) {
+            return Err(OrtError::input("pooled_output name must not be empty"));
         }
 
         let environment = ensure_runtime()?;
@@ -217,11 +237,12 @@ impl ScoringSession {
         &self.config
     }
 
-    /// Score every marker in the batch, returning one logit per marker.
-    pub fn score(&self, inputs: ScoringInputs<'_>) -> Result<Vec<f32>, OrtError> {
+    /// Score every marker in the batch, returning one logit per marker and,
+    /// when configured, the pooled `[batch, hidden]` representation.
+    pub fn score(&self, inputs: ScoringInputs<'_>) -> Result<ScoringOutputs, OrtError> {
         inputs.validate()?;
         if inputs.markers.is_empty() {
-            return Ok(Vec::new());
+            return Ok(ScoringOutputs::default());
         }
 
         let input_ids = Tensor::from_array((
@@ -271,7 +292,32 @@ impl ScoringSession {
                 ),
             ));
         }
-        Ok(logits.to_vec())
+        let logits = logits.to_vec();
+
+        let pooled = match &self.config.pooled_output {
+            Some(name) => {
+                let value = outputs.get(name.as_str()).ok_or_else(|| {
+                    OrtError::output(name, "configured pooled output was not produced")
+                })?;
+                let (shape, pooled) = value
+                    .try_extract_tensor::<f32>()
+                    .map_err(|error| OrtError::output(name, error))?;
+                let elements = shape.num_elements();
+                if elements == 0 || elements % inputs.batch != 0 {
+                    return Err(OrtError::output(
+                        name,
+                        format!(
+                            "pooled output has {elements} values for batch={} in shape {shape}",
+                            inputs.batch
+                        ),
+                    ));
+                }
+                Some(pooled.to_vec())
+            }
+            None => None,
+        };
+
+        Ok(ScoringOutputs { logits, pooled })
     }
 }
 

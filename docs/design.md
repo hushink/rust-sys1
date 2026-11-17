@@ -232,11 +232,11 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 - 生产收尾：CORS allowlist/关闭与优雅关闭已实现并有测试；CLI Ctrl-C/SIGTERM 停止接收并 drain。
 - CI：三平台 fmt/clippy/test；可选 self-hosted GPU workflow 运行长上下文对齐与 loadgen 冒烟。
 - 官方 golden：三个 checkpoint 的 `case_dict_state` 答案在 1e-3 内一致，含 `action.act_probability`；multilingual 特殊 token 已修正。
-- 路由与 act head：官方 routing probe 159/159 用例的 model、workflow、reason 与 detection 完全一致；act head 在 candle 后端由 checkpoint 的 `act_head.*` 自动启用并写入 `DecisionOutput.actions`（官方 wire 不包含）。ONNX 导出暂未包含 act head。细节见 ADR 0013。
+- 路由与 act head：官方 routing probe 159/159 用例的 model、workflow、reason 与 detection 完全一致；act head 由 checkpoint 的 `act_head.*` 自动启用并写入 `DecisionOutput.actions`（官方 wire 不包含）。ONNX 导出新增 `pooled` 输出与 `act_head.safetensors` sidecar，actions 与 candle 在 2e-3 内一致。细节见 ADR 0013 / 0016。
 - 长上下文扫描：`DecisionModel::predict_long`、`LongContextOptions`、`WindowAttribution` 与 `sys1 run --long` 已实现；默认窗口受问题 state 余量限制、50% 重叠，`noul` 取最大、`choice`/`score` 取最自信窗口。英文 checkpoint 与官方 `predict_long` 的答案、act、窗口归因与 usage 对齐。细节见 ADR 0014。
 - Abstention：`PredictionOptions`/`MinConfidence` 支持标量与按 question type/选项数分桶的阈值，`DecisionOutput.abstentions` 保存 `passed`/`abstained`/`unevaluated` 与 `low_confidence`，答案 payload 与 wire 不变；`sys1 run --min-confidence` 输出官方同名字段。英文 checkpoint 的标量与 bucket gate 与官方一致。细节见 ADR 0015。
 - 真实上游：`sys1-hub` 的 `SYS1_LIVE_HUB=1` 测试可解析真实 HF 与 ModelScope manifest；受限网络可用 `HF_ENDPOINT=https://hf-mirror.com`。
-- 待补：zstd、parallel layout、ONNX act head/ORT/TensorRT、GPU 实机 CI。
+- 待补：zstd、parallel layout、ORT EP/TensorRT 实机、GPU CI。
 
 ## 11. 已确认与遗留
 
@@ -250,7 +250,7 @@ let tone = output.answers.choice("tone")?; // 类型化读取
 
 1. Laya 权重许可证：再分发前确认；v1 不内置权重。
 2. Laya 原生 confidence 的 HTTP 暴露方式：独立 `/api/*` 端点或响应头（v1.1）。
-3. zstd 请求压缩、ONNX/ORT/TensorRT、ONNX act head、parallel layout；GPU 实机 CI。
+3. zstd 请求压缩、ORT EP/TensorRT 实机、parallel layout；GPU CI。
 
 ## 12. 决策索引
 

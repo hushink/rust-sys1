@@ -13,9 +13,14 @@ Inputs:
     type_ids       int64 [batch]
     markers        int64 [n]       flattened row * seq + position
 
-Output:
+Outputs:
 
     logits         float32 [n]
+    pooled         float32 [batch, hidden]   token 0 after the decision head
+
+When the checkpoint contains `act_head.*`, the exporter also writes
+`act_head.safetensors` beside `model.onnx`; `sys1-laya` uses it to produce
+`action.act_probability` without running a second ONNX graph.
 
 Usage:
 
@@ -37,6 +42,7 @@ import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
 from safetensors import safe_open
+from safetensors.numpy import save_file as save_safetensors
 
 ATTENTION_MASK_VALUE = np.float32(-10000.0)
 HEAD_MASK_VALUE = np.float32(-1_000_000_000.0)
@@ -167,12 +173,14 @@ class Builder:
         scaled = self.binary("Mul", shifted, half)
         return self.binary("Mul", scaled, x)
 
-    def model(self, inputs: list[onnx.ValueInfoProto], output: str) -> onnx.ModelProto:
+    def model(
+        self, inputs: list[onnx.ValueInfoProto], outputs: list[onnx.ValueInfoProto]
+    ) -> onnx.ModelProto:
         graph = helper.make_graph(
             self.nodes,
             "laya_onnx",
             inputs,
-            [helper.make_tensor_value_info(output, TensorProto.FLOAT, ["n"])],
+            outputs,
             self.initializers,
         )
         model = helper.make_model(
@@ -621,14 +629,52 @@ def build_model(checkpoint: Path) -> onnx.ModelProto:
         hint="logits",
     )
     logits = b.alias(logits, "logits")
+    pooled = b.op(
+        "Gather",
+        [x, b.i64s([0], "pooled_index")],
+        axis=1,
+        hint="pooled",
+    )
+    pooled = b.op(
+        "Squeeze",
+        [pooled, b.i64s([1], "pooled_axes")],
+        hint="pooled",
+    )
+    pooled = b.alias(pooled, "pooled")
 
     return b.model(
         [input_ids, attention_mask_input, type_ids, markers],
-        logits,
+        [
+            helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["n"]),
+            helper.make_tensor_value_info(
+                "pooled", TensorProto.FLOAT, ["batch", "hidden"]
+            ),
+        ],
     )
 
 
-def copy_model_assets(checkpoint: Path, output: Path) -> None:
+ACT_HEAD_TENSORS = (
+    "act_head.0.weight",
+    "act_head.0.bias",
+    "act_head.2.weight",
+    "act_head.2.bias",
+)
+
+
+def act_head_weights(checkpoint: Path) -> dict[str, np.ndarray] | None:
+    """Copy the optional act head into a small safetensors sidecar.
+
+    The head is tiny compared with the encoder; keeping it out of the ONNX
+    graph lets `sys1-laya` reuse the candle act-head math instead of a second
+    ONNX session.
+    """
+    weights = Weights(checkpoint / "model.safetensors")
+    if not all(weights.has(name) for name in ACT_HEAD_TENSORS):
+        return None
+    return {name: weights.get(name) for name in ACT_HEAD_TENSORS}
+
+
+def copy_model_assets(checkpoint: Path, output: Path, has_act_head: bool) -> None:
     output.mkdir(parents=True, exist_ok=True)
     agent_source = checkpoint / "rl_agent_config.json"
     agent_target = output / "rl_agent_config.json"
@@ -645,21 +691,19 @@ def copy_model_assets(checkpoint: Path, output: Path) -> None:
         raise FileNotFoundError(f"no tokenizer found under {checkpoint}")
     sidecar = output / "onnx.json"
     if not sidecar.exists():
-        sidecar.write_text(
-            json.dumps(
-                {
-                    "model": "model.onnx",
-                    "max_batch": 8,
-                    "input_ids": "input_ids",
-                    "attention_mask": "attention_mask",
-                    "type_ids": "type_ids",
-                    "markers": "markers",
-                    "output": "logits",
-                },
-                indent=2,
-            )
-            + "\n"
-        )
+        data = {
+            "model": "model.onnx",
+            "max_batch": 8,
+            "input_ids": "input_ids",
+            "attention_mask": "attention_mask",
+            "type_ids": "type_ids",
+            "markers": "markers",
+            "output": "logits",
+            "pooled_output": "pooled",
+        }
+        if has_act_head:
+            data["act_head"] = "act_head.safetensors"
+        sidecar.write_text(json.dumps(data, indent=2) + "\n")
 
 
 def main() -> None:
@@ -673,12 +717,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    act_head = act_head_weights(args.checkpoint)
     model = build_model(args.checkpoint)
     args.output.mkdir(parents=True, exist_ok=True)
     target = args.output / "model.onnx"
     onnx.save(model, target)
+    if act_head is not None and not args.skip_assets:
+        save_safetensors(act_head, args.output / "act_head.safetensors")
     if not args.skip_assets:
-        copy_model_assets(args.checkpoint, args.output)
+        copy_model_assets(args.checkpoint, args.output, act_head is not None)
     print(f"wrote {target} ({target.stat().st_size / 1024 / 1024:.1f} MiB)")
     if not args.skip_assets:
         print(f"ready to serve: {args.output}")

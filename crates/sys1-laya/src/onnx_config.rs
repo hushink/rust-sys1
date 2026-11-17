@@ -5,6 +5,8 @@ use sys1_core::ModelError;
 
 /// Optional sidecar that customizes the ONNX scoring contract.
 pub(crate) const ONNX_SIDECAR: &str = "onnx.json";
+/// Conventional act-head weights file written by the exporter.
+pub(crate) const DEFAULT_ACT_HEAD: &str = "act_head.safetensors";
 
 fn default_model() -> String {
     "model.onnx".to_owned()
@@ -59,6 +61,13 @@ pub(crate) struct OnnxFileConfig {
     pub markers: String,
     #[serde(default = "default_output")]
     pub output: String,
+    /// Optional `[batch, hidden]` pooled output used by an act head.
+    #[serde(default)]
+    pub pooled_output: Option<String>,
+    /// Optional act-head weights sidecar. Defaults to
+    /// `act_head.safetensors` when that file exists.
+    #[serde(default)]
+    pub act_head: Option<String>,
 }
 
 impl Default for OnnxFileConfig {
@@ -73,6 +82,8 @@ impl Default for OnnxFileConfig {
             type_ids: default_type_ids(),
             markers: default_markers(),
             output: default_output(),
+            pooled_output: None,
+            act_head: None,
         }
     }
 }
@@ -92,23 +103,56 @@ impl OnnxFileConfig {
 
     /// Resolve `model` inside `directory`, rejecting paths outside it.
     pub(crate) fn model_path(&self, directory: &Path) -> Result<PathBuf, ModelError> {
-        let path = Path::new(&self.model);
-        if path.as_os_str().is_empty() {
-            return Err(ModelError::load("onnx model path must not be empty"));
-        }
-        if path.is_absolute()
-            || path.components().any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
-                )
-            })
+        resolve_inside(directory, &self.model, "onnx model path")
+    }
+
+    /// Resolve the optional act-head sidecar.
+    ///
+    /// An explicit `act_head` must exist. Without one, a conventional
+    /// `act_head.safetensors` beside the model enables the head automatically.
+    pub(crate) fn act_head_path(&self, directory: &Path) -> Result<Option<PathBuf>, ModelError> {
+        let path = match &self.act_head {
+            Some(value) => Some(resolve_inside(directory, value, "onnx act_head path")?),
+            None => {
+                let candidate = directory.join(DEFAULT_ACT_HEAD);
+                candidate.is_file().then_some(candidate)
+            }
+        };
+        if let Some(path) = &path
+            && !path.is_file()
         {
             return Err(ModelError::load(format!(
-                "onnx model path must stay inside the model directory: {}",
-                self.model
+                "missing act-head weights at {}",
+                path.display()
             )));
         }
-        Ok(directory.join(path))
+        Ok(path)
     }
+
+    /// The pooled output name to request when an act head is enabled.
+    pub(crate) fn pooled_output(&self, has_act_head: bool) -> Option<String> {
+        self.pooled_output
+            .clone()
+            .or_else(|| has_act_head.then(|| "pooled".to_owned()))
+    }
+}
+
+fn resolve_inside(directory: &Path, value: &str, label: &str) -> Result<PathBuf, ModelError> {
+    let path = Path::new(value);
+    if path.as_os_str().is_empty() {
+        return Err(ModelError::load(format!("{label} must not be empty")));
+    }
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(ModelError::load(format!(
+            "{label} must stay inside the model directory: {value}"
+        )));
+    }
+    Ok(directory.join(path))
 }

@@ -16,7 +16,8 @@
 //!
 //! `markers` contains flattened positions into `[batch * seq]`. The graph
 //! gathers hidden states at those positions and produces one float32 logit per
-//! marker under [`DEFAULT_OUTPUT`].
+//! marker under [`DEFAULT_OUTPUT`]. It may also expose a float32
+//! `[batch, hidden]` [`DEFAULT_POOLED_OUTPUT`] tensor for act heads.
 //!
 //! ONNX Runtime is loaded dynamically. Set `ORT_DYLIB_PATH` to an
 //! `onnxruntime` shared library, or place it on the platform loader search
@@ -29,8 +30,9 @@ mod session;
 
 pub use error::OrtError;
 pub use session::{
-    DEFAULT_ATTENTION_MASK, DEFAULT_INPUT_IDS, DEFAULT_MARKERS, DEFAULT_OUTPUT, DEFAULT_TYPE_IDS,
-    ScoringInputs, ScoringSession, SessionConfig,
+    DEFAULT_ATTENTION_MASK, DEFAULT_INPUT_IDS, DEFAULT_MARKERS, DEFAULT_OUTPUT,
+    DEFAULT_POOLED_OUTPUT, DEFAULT_TYPE_IDS, ScoringInputs, ScoringOutputs, ScoringSession,
+    SessionConfig,
 };
 
 /// The ONNX Runtime version this crate is built against.

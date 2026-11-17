@@ -70,9 +70,9 @@ tokenizer/tokenizer.json
 ```
 
 An ONNX export instead provides `model.onnx` (or the file named by
-`onnx.json`), `rl_agent_config.json`, and a tokenizer. Export one with the
-pure NumPy/ONNX translator (no PyTorch), then check it against the official
-golden logits:
+`onnx.json`), `rl_agent_config.json`, a tokenizer, and optionally
+`act_head.safetensors`. Export one with the pure NumPy/ONNX translator (no
+PyTorch), then check it against the official golden logits:
 
 ```bash
 uv run --with onnx --with safetensors --with numpy --python 3.13 \
@@ -84,7 +84,9 @@ uv run --with onnxruntime --with numpy --python 3.13 \
 ```
 
 All three checkpoints matched the official golden logits with max
-`|ONNX - golden|` between 1.7e-6 and 2.5e-6. See the
+`|ONNX - golden|` between 1.7e-6 and 2.5e-6. The exporter also emits a `pooled`
+output and copies the act head, so ONNX backend actions match candle within
+2e-3. See the
 [`sys1-laya` ONNX contract](crates/sys1-laya/README.md#onnx-runtime-backend).
 Use a current ONNX Runtime for these multi-gigabyte graphs; 1.17 was unstable
 on Windows for the 1.2 GiB multilingual export, while 1.32 worked.
@@ -631,7 +633,6 @@ cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 - CPU int8 quantization / MKL. A candle `Q8_0` GEMM probe was only ~6% faster
   than F32 on a representative 2304×768×1024 layer and `Q4_0` was slower, so it
   was not integrated; MKL crates are not available in the offline cache.
-- ONNX exports do not include Laya's act head; `actions` is empty on that backend.
 - Laya weight license must be checked before redistribution. The repo does not bundle weights.
 
 ## Documentation

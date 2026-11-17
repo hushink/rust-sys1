@@ -1,7 +1,9 @@
 #![cfg(feature = "onnx")]
 
+use candle_core::{DType, Device, Tensor};
 use indexmap::IndexMap;
 use serde_json::json;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use sys1_core::{DecisionModel, ModelFactory, Prediction, Questions};
@@ -72,6 +74,35 @@ fn model_directory() -> TempDir {
     directory
 }
 
+fn write_act_head(directory: &Path) {
+    let device = Device::Cpu;
+    let mut input = vec![0.0_f32; 256 * 5];
+    input[0] = 1.0;
+    let mut output = vec![0.0_f32; 2 * 256];
+    output[0] = 1.0;
+    output[256] = -1.0;
+    let tensors = HashMap::from([
+        (
+            "act_head.0.weight".to_owned(),
+            Tensor::from_vec(input, (256, 5), &device).expect("act input"),
+        ),
+        (
+            "act_head.0.bias".to_owned(),
+            Tensor::zeros(256, DType::F32, &device).expect("act input bias"),
+        ),
+        (
+            "act_head.2.weight".to_owned(),
+            Tensor::from_vec(output, (2, 256), &device).expect("act output"),
+        ),
+        (
+            "act_head.2.bias".to_owned(),
+            Tensor::zeros(2, DType::F32, &device).expect("act output bias"),
+        ),
+    ]);
+    candle_core::safetensors::save(&tensors, directory.join("act_head.safetensors"))
+        .expect("save act head");
+}
+
 fn load(directory: &Path) -> Option<LayaOnnxModel> {
     match LayaOnnxModel::load_dir(directory, LayaOptions::default()) {
         Ok(model) => Some(model),
@@ -114,6 +145,25 @@ fn predicts_every_question_type_through_onnx() {
 
     let noul = output.answers.noul("billing").expect("noul answer");
     assert_eq!(noul.noul, 0.5);
+}
+
+#[test]
+fn act_head_sidecar_enables_actions() {
+    let directory = model_directory();
+    write_act_head(directory.path());
+    let Some(model) = load(directory.path()) else {
+        return;
+    };
+    let state = State::from_value(json!("hello world")).expect("state");
+    let output = model.predict(&state, &question_set()).expect("predict");
+
+    for id in ["tone", "urgency", "billing"] {
+        let action = output
+            .action(id)
+            .unwrap_or_else(|| panic!("missing action for {id}"));
+        assert!((0.0..=1.0).contains(&action), "{id} action: {action}");
+        assert!(action > 0.5, "{id} action should favor class 0: {action}");
+    }
 }
 
 #[test]

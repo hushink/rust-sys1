@@ -2,16 +2,85 @@ use crate::LayaOptions;
 use crate::calibration::ConfidenceMode;
 use crate::config::LayaConfig;
 use crate::long;
+use crate::model::ActHead;
 use crate::onnx_config::OnnxFileConfig;
 use crate::prepare::{Item, PreparedRequest, deduplicate, prepare_request};
 use crate::response::build_response;
 use crate::tokenizer::LayaTokenizer;
+use candle_core::{DType, Device, Tensor};
+use candle_nn::Linear;
 use std::path::Path;
 use sys1_core::{
     DecisionModel, DecisionOutput, LongContextOptions, ModelError, Prediction, Questions,
 };
 use sys1_ort::{ScoringInputs, ScoringSession, SessionConfig};
 use sys1_protocol::State;
+
+type ScoredItem = (Vec<f32>, Option<f32>);
+
+struct OnnxActHead {
+    head: ActHead,
+    hidden: usize,
+}
+
+impl OnnxActHead {
+    fn load(path: &Path) -> Result<Self, ModelError> {
+        let tensors = candle_core::safetensors::load(path, &Device::Cpu).map_err(|error| {
+            ModelError::load(format!("read act head {}: {error}", path.display()))
+        })?;
+        let tensor = |name: &str| -> Result<Tensor, ModelError> {
+            tensors
+                .get(name)
+                .ok_or_else(|| {
+                    ModelError::load(format!(
+                        "act head {} is missing tensor {name}",
+                        path.display()
+                    ))
+                })?
+                .to_dtype(DType::F32)
+                .map_err(|error| ModelError::load(error.to_string()))
+        };
+
+        let input_weight = tensor("act_head.0.weight")?;
+        let input_bias = tensor("act_head.0.bias")?;
+        let output_weight = tensor("act_head.2.weight")?;
+        let output_bias = tensor("act_head.2.bias")?;
+        let (rows, columns) = input_weight
+            .dims2()
+            .map_err(|error| ModelError::load(error.to_string()))?;
+        if rows != 256 || columns < 5 {
+            return Err(ModelError::load(format!(
+                "act_head.0.weight must have shape [256, hidden + 4], got [{rows}, {columns}]"
+            )));
+        }
+        let hidden = columns - 4;
+        if input_bias.dims1().ok() != Some(256)
+            || output_weight.dims2().ok() != Some((2, 256))
+            || output_bias.dims1().ok() != Some(2)
+        {
+            return Err(ModelError::load(
+                "act head has unexpected bias or output-weight shape",
+            ));
+        }
+
+        Ok(Self {
+            head: ActHead::from_parts(
+                Linear::new(input_weight, Some(input_bias)),
+                Linear::new(output_weight, Some(output_bias)),
+                DType::F32,
+            ),
+            hidden,
+        })
+    }
+
+    fn forward(&self, pooled: &[f32], logits: &[f32]) -> Result<f32, ModelError> {
+        let pooled = Tensor::new(pooled, &Device::Cpu)
+            .map_err(|error| ModelError::inference(error.to_string()))?;
+        self.head
+            .forward(&pooled, logits)
+            .map_err(|error| ModelError::inference(error.to_string()))
+    }
+}
 
 /// A Laya checkpoint executed by ONNX Runtime.
 ///
@@ -25,6 +94,7 @@ pub struct LayaOnnxModel {
     session: ScoringSession,
     confidence_mode: ConfidenceMode,
     max_batch: usize,
+    act_head: Option<OnnxActHead>,
 }
 
 impl LayaOnnxModel {
@@ -56,12 +126,20 @@ impl LayaOnnxModel {
             )));
         }
 
+        let act_head = onnx
+            .act_head_path(directory)?
+            .as_deref()
+            .map(OnnxActHead::load)
+            .transpose()?;
+        let pooled_output = onnx.pooled_output(act_head.is_some());
+
         let mut session_config = SessionConfig::new(model_path);
         session_config.input_ids = onnx.input_ids;
         session_config.attention_mask = onnx.attention_mask;
         session_config.type_ids = onnx.type_ids;
         session_config.markers = onnx.markers;
         session_config.output = onnx.output;
+        session_config.pooled_output = pooled_output;
         session_config.intra_threads = onnx.intra_threads;
         session_config.inter_threads = onnx.inter_threads;
         let session = ScoringSession::load(session_config)
@@ -73,10 +151,11 @@ impl LayaOnnxModel {
             session,
             confidence_mode: options.confidence_mode,
             max_batch: onnx.max_batch.max(1),
+            act_head,
         })
     }
 
-    fn forward(&self, prepared: &[PreparedRequest]) -> Result<Vec<Vec<f32>>, ModelError> {
+    fn forward(&self, prepared: &[PreparedRequest]) -> Result<Vec<ScoredItem>, ModelError> {
         let items: Vec<&Item> = prepared
             .iter()
             .flat_map(|request| request.items.iter())
@@ -102,7 +181,7 @@ impl LayaOnnxModel {
     ) -> Vec<Result<DecisionOutput, ModelError>> {
         match self.forward(&prepared) {
             Ok(outputs) => {
-                let mut outputs = outputs.into_iter().map(|logits| (logits, None));
+                let mut outputs = outputs.into_iter();
                 prepared
                     .into_iter()
                     .map(|request| {
@@ -119,11 +198,11 @@ impl LayaOnnxModel {
         }
     }
 
-    fn score_items(&self, items: &[&Item]) -> Result<Vec<Vec<f32>>, ModelError> {
+    fn score_items(&self, items: &[&Item]) -> Result<Vec<ScoredItem>, ModelError> {
         let batch = items.len();
         let seq = items.iter().map(|item| item.ids.len()).max().unwrap_or(0);
         if batch == 0 || seq == 0 {
-            return Ok(vec![Vec::new(); batch]);
+            return Ok(vec![(Vec::new(), None); batch]);
         }
 
         let mut input_ids = vec![self.tokenizer.pad_id as i64; batch * seq];
@@ -147,7 +226,7 @@ impl LayaOnnxModel {
             );
         }
 
-        let logits = self
+        let outputs = self
             .session
             .score(ScoringInputs {
                 input_ids: &input_ids,
@@ -160,17 +239,38 @@ impl LayaOnnxModel {
             .map_err(|error| ModelError::inference(error.to_string()))?;
 
         let expected: usize = counts.iter().sum();
-        if logits.len() != expected {
+        if outputs.logits.len() != expected {
             return Err(ModelError::inference(format!(
                 "ONNX model returned {} logits for {expected} markers",
-                logits.len()
+                outputs.logits.len()
             )));
         }
 
         let mut output = Vec::with_capacity(batch);
         let mut offset = 0;
-        for count in counts {
-            output.push(logits[offset..offset + count].to_vec());
+        for (row, count) in counts.into_iter().enumerate() {
+            let values = outputs.logits[offset..offset + count].to_vec();
+            let action = match (&self.act_head, outputs.pooled.as_deref()) {
+                (Some(head), Some(pooled)) => {
+                    let start = row * head.hidden;
+                    let end = start + head.hidden;
+                    let pooled = pooled.get(start..end).ok_or_else(|| {
+                        ModelError::inference(format!(
+                            "ONNX pooled output has {} values for batch={batch} hidden={}",
+                            pooled.len(),
+                            head.hidden
+                        ))
+                    })?;
+                    Some(head.forward(pooled, &values)?)
+                }
+                (Some(_), None) => {
+                    return Err(ModelError::inference(
+                        "ONNX model has an act head but produced no pooled output",
+                    ));
+                }
+                _ => None,
+            };
+            output.push((values, action));
             offset += count;
         }
         Ok(output)

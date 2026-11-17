@@ -34,6 +34,7 @@ model.onnx                 # 或 onnx.json 指定的文件
 rl_agent_config.json
 tokenizer/tokenizer.json   # 或 tokenizer.json
 onnx.json                  # 可选
+act_head.safetensors       # 可选的 act head 权重
 ```
 
 `LayaOnnxModel::load_dir` 与 `LayaModel` 共用 tokenization、序列布局、校准和
@@ -54,6 +55,11 @@ onnx.json                  # 可选
 encoder、type embedding、decision head、marker gather 与 scorer，并输出形状为
 `[n]` 的 float32 `logits`，每个 marker 一个 logit。batch 与 seq 轴必须是动态的。
 
+计算图还可输出形状 `[batch, hidden]` 的 `pooled`：decision head 之后 token 0
+的表示。存在 `act_head.safetensors`（或配置了 `act_head`）时，`LayaOnnxModel`
+会请求 `pooled`，并用与 candle 后端相同的 act-head 数学计算
+`action.act_probability`。
+
 `onnx.json` 可覆盖默认值：
 
 ```json
@@ -66,11 +72,14 @@ encoder、type embedding、decision head、marker gather 与 scorer，并输出�
   "attention_mask": "attention_mask",
   "type_ids": "type_ids",
   "markers": "markers",
-  "output": "logits"
+  "output": "logits",
+  "pooled_output": "pooled",
+  "act_head": "act_head.safetensors"
 }
 ```
 
-`max_batch` 限制每次 ONNX run 的 unique item 数，超出会切分。ONNX Runtime 在创建
+`max_batch` 限制每次 ONNX run 的 unique item 数，超出会切分。`pooled_output`
+与 `act_head` 可选；没有 act-head sidecar 时该后端返回空的 `actions`。ONNX Runtime 在创建
 session 时动态加载：设置 `ORT_DYLIB_PATH` 指向 `onnxruntime` 共享库，或将库放入
 平台加载路径。构建期不会下载运行时二进制。绑定以 ONNX Runtime API 17 为目标，
 已在 1.17 上验证。
@@ -89,10 +98,12 @@ uv run --with onnxruntime --with numpy --python 3.13 \
 ```
 
 导出器写出 F32 权重（multilingual 约 1.2 GiB，大模型约 1.6 GiB），复制
-tokenizer 与 `rl_agent_config.json`，并生成 `onnx.json`。三个 checkpoint 的
-导出 logits 均与官方 golden 对比：最大 `|ONNX - golden|` 为 1.7e-6 到 2.5e-6。
+tokenizer 与 `rl_agent_config.json`，生成 `onnx.json`，并在 checkpoint 含
+act head 时复制 `act_head.safetensors`。三个 checkpoint 的导出 logits 均与官方
+golden 对比：最大 `|ONNX - golden|` 为 1.7e-6 到 2.5e-6。
 
-Rust 端到端一致性测试会比较 candle 与 ONNX 的答案：
+Rust 端到端一致性测试会比较 candle 与 ONNX 的答案；两侧都有 act head 时还比较
+`action.act_probability`：
 
 ```powershell
 $env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
@@ -143,8 +154,8 @@ let urgency = output.answers.score("urgency")?;
   `batch * heads * seq_len²` 上限（默认 64M 元素），超出会切分。
 - `router` / `lang_guess`：见 [Router](#router)。
 - checkpoint 若包含 `act_head.*`，还会预测 `action.act_probability`，通过
-  `output.action(id)` 与 `output.actions` 读取。ONNX 导出暂未包含该 head，
-  因此该后端的 `actions` 为空。
+  `output.action(id)` 与 `output.actions` 读取。ONNX 导出带有
+  `act_head.safetensors` 时会启用同一个 head；旧导出返回空 map。
 
 `TypeSafe` confidence 为 `(K * p_max - 1) / (K - 1)`；`LayaNative` 为
 `1 - H(p) / ln(K)`。`noul` 按官方形状不携带 confidence。
@@ -288,7 +299,7 @@ eager。
 
 ## 限制
 
-- 未实现 long context 扫描、act head、abstention、parallel option layout。
+- 未实现 parallel option layout（`option_layout = "parallel"` 的 checkpoint）。
 - Laya 不支持 box questions，返回 `ModelError::Unsupported`。
 - 不内置模型权重；再分发前需确认权重许可证。
 

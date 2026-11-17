@@ -11,7 +11,7 @@ token-scoring 契约；模型 family 保留 tokenization、序列布局、校准
 use sys1_ort::{ScoringInputs, ScoringSession, SessionConfig};
 
 let session = ScoringSession::load(SessionConfig::new("model.onnx"))?;
-let logits = session.score(ScoringInputs {
+let outputs = session.score(ScoringInputs {
     input_ids: &[1, 2, 3, 4],
     attention_mask: &[1, 1, 1, 1],
     type_ids: &[0],
@@ -19,12 +19,19 @@ let logits = session.score(ScoringInputs {
     batch: 1,
     seq: 4,
 })?;
-assert_eq!(logits.len(), 2);
+assert_eq!(outputs.logits.len(), 2);
+
+// act head 可选的 [batch, hidden] pooled 输出：
+let mut config = SessionConfig::new("model.onnx");
+config.pooled_output = Some("pooled".to_owned());
+let outputs = ScoringSession::load(config)?.score(/* ... */)?;
 ```
 
 `SessionConfig` 可覆盖所有输入/输出名，并设置 intra-op/inter-op 线程数。
 `ScoringInputs::validate` 会在调用运行时前拒绝形状不匹配与超出
-`0..batch * seq` 的 marker 索引。
+`0..batch * seq` 的 marker 索引。设置 `pooled_output` 后，
+`ScoringOutputs::pooled` 包含展平的 `[batch, hidden]` 张量；元素数必须能被
+`batch` 整除。
 
 ## 契约
 
@@ -36,7 +43,9 @@ assert_eq!(logits.len(), 2);
 | `markers` | int64 | `[n]` |
 
 `markers` 是 `[batch * seq]` 的扁平位置。模型在每个 marker 处 gather hidden
-state，并输出形状 `[n]` 的 float32 `logits`。batch 与 seq 轴必须是动态的。
+state，并输出形状 `[n]` 的 float32 `logits`。模型还可以额外输出形状
+`[batch, hidden]` 的 float32 `pooled`，供 act head 使用。batch 与 seq 轴必须是
+动态的。
 `Session::run` 接收 `&mut self`，因此 `ScoringSession` 用 mutex 串行化并发 run；
 单次 run 内部由 ONNX Runtime 并行。
 

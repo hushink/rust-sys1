@@ -35,6 +35,7 @@ model.onnx                 # or the file named by onnx.json
 rl_agent_config.json
 tokenizer/tokenizer.json   # or tokenizer.json
 onnx.json                  # optional
+act_head.safetensors       # optional act-head weights
 ```
 
 `LayaOnnxModel::load_dir` shares tokenization, sequence layout, calibration,
@@ -56,6 +57,11 @@ The graph applies the encoder, type embedding, decision head, marker gather,
 and scorer, then returns one float32 logit per marker as `logits` with shape
 `[n]`. Batch and sequence axes must be dynamic.
 
+It may also return `pooled` with shape `[batch, hidden]`: token 0 after the
+decision-head layers. When `act_head.safetensors` is present (or `act_head` is
+configured), `LayaOnnxModel` requests `pooled` and computes
+`action.act_probability` with the same act-head math as the candle backend.
+
 `onnx.json` overrides defaults:
 
 ```json
@@ -68,11 +74,15 @@ and scorer, then returns one float32 logit per marker as `logits` with shape
   "attention_mask": "attention_mask",
   "type_ids": "type_ids",
   "markers": "markers",
-  "output": "logits"
+  "output": "logits",
+  "pooled_output": "pooled",
+  "act_head": "act_head.safetensors"
 }
 ```
 
 `max_batch` bounds unique items per ONNX run; larger requests are chunked.
+`pooled_output` and `act_head` are optional; without an act-head sidecar the
+backend returns an empty `actions` map.
 ONNX Runtime is loaded dynamically at session creation. Set `ORT_DYLIB_PATH`
 to the `onnxruntime` shared library, or put it on the platform loader path.
 Builds never download runtime binaries. The binding targets ONNX Runtime API
@@ -93,11 +103,13 @@ uv run --with onnxruntime --with numpy --python 3.13 \
 ```
 
 The exporter writes F32 weights (~1.2 GiB for multilingual, ~1.6 GiB for the
-large checkpoints), copies the tokenizer and `rl_agent_config.json`, and writes
-`onnx.json`. Exported logits were checked against the official golden vectors
-for all three checkpoints: max `|ONNX - golden|` was 1.7e-6 to 2.5e-6.
+large checkpoints), copies the tokenizer and `rl_agent_config.json`, writes
+`onnx.json`, and copies `act_head.safetensors` when the checkpoint has an act
+head. Exported logits were checked against the official golden vectors for all
+three checkpoints: max `|ONNX - golden|` was 1.7e-6 to 2.5e-6.
 
-The Rust end-to-end parity test compares candle and ONNX answers:
+The Rust end-to-end parity test compares candle and ONNX answers, including
+`action.act_probability` when both backends have an act head:
 
 ```powershell
 $env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
@@ -150,8 +162,8 @@ let urgency = output.answers.score("urgency")?;
 - `router` / `lang_guess`: see [Router](#router).
 - Checkpoints that carry an `act_head.*` head also predict
   `action.act_probability`, exposed as `output.action(id)` and
-  `output.actions`. The ONNX export does not include the head yet, so that
-  backend returns an empty `actions` map.
+  `output.actions`. The ONNX backend enables the same head when the export has
+  an `act_head.safetensors` sidecar; older exports return an empty map.
 
 `TypeSafe` confidence is `(K * p_max - 1) / (K - 1)`; `LayaNative` is
 `1 - H(p) / ln(K)`. `noul` answers never carry confidence, matching the official shape.
@@ -308,7 +320,7 @@ model-level table; `LayaOptions::local_window = false` (or CLI
 
 ## Limitations
 
-- Long-context scanning, act head, abstention, and parallel option layout are not implemented.
+- Parallel option layout (`option_layout = "parallel"` checkpoints) is not implemented.
 - Box questions are unsupported by Laya and return `ModelError::Unsupported`.
 - Model weights are not bundled; check their license before redistribution.
 

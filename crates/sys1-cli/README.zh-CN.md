@@ -32,7 +32,8 @@ sys1 run local:/path/to/laya-multilingual --input request.json
 ## ONNX 模型
 
 CLI 默认启用 `onnx` feature。包含 `model.onnx`（或由 `onnx.json` 指定其他文件）、
-`rl_agent_config.json` 与 tokenizer 的目录会被识别为 Laya ONNX 导出：
+`rl_agent_config.json`、tokenizer，以及可选 `act_head.safetensors` 的目录会被识别
+为 Laya ONNX 导出：
 
 ```bash
 sys1 serve --model laya-onnx=local:/path/to/laya-onnx
@@ -42,7 +43,8 @@ sys1 run local:/path/to/laya-onnx --input request.json
 ONNX Runtime 在加载模型时动态加载。设置 `ORT_DYLIB_PATH` 指向 `onnxruntime`
 共享库，或将其安装到平台加载路径。多 GB 导出建议使用较新的 ONNX Runtime。
 计算图输入/输出契约、可选 `onnx.json` 字段与纯 NumPy 导出器见
-[`sys1-laya`](../sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
+[`sys1-laya`](../sys1-laya/README.zh-CN.md#onnx-runtime-后端)。带 act-head
+sidecar 的导出同样会生成 `action.act_probability`，与 candle 后端一致。
 CLI 的 `pull`/`show` 也接受 ONNX manifest（`backend = "onnx"`、`format = "onnx"`）。
 
 ## 启动服务
@@ -276,11 +278,12 @@ sys1 run local:/path/to/laya-multilingual --input request.json \
 state 会走普通单次调用。`--stride` 不能超过有效窗口；`--long-batch` 限制每次
 前向的窗口数。
 
-启用 `--min-confidence` 后，每个答案会增加 `abstention`（`passed`、
-`abstained` 或 `unevaluated`）与 `abstention_threshold`；只有 abstained 的答案
-会出现 `low_confidence: true`。Gate 比较的是答案最大概率，而不是报告中的
-confidence；该选项不支持与 `--long` 同时使用。typed API 还支持按 bucket
-设置阈值映射。
+checkpoint 或 ONNX 导出含 act head 时，每个答案会增加
+`"action": {"act_probability": ...}`。启用 `--min-confidence` 后，每个答案还会
+增加 `abstention`（`passed`、`abstained` 或 `unevaluated`）与
+`abstention_threshold`；只有 abstained 的答案会出现 `low_confidence: true`。
+Gate 比较的是答案最大概率，而不是报告中的 confidence；该选项不支持与 `--long`
+同时使用。typed API 还支持按 bucket 设置阈值映射。
 
 ## 压测
 

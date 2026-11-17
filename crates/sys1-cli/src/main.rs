@@ -608,10 +608,10 @@ fn run_command(
     let sys1_core::DecisionOutput {
         answers,
         usage,
+        actions,
         windows,
         scored_windows,
         abstentions,
-        ..
     } = output;
     let response = SystemOneResponse {
         model: pulled.manifest.name,
@@ -640,16 +640,23 @@ fn run_command(
             usage.insert("windows".to_owned(), serde_json::json!(scored_windows));
         }
     }
-    if !abstentions.is_empty() {
+    if !actions.is_empty() || !abstentions.is_empty() {
         let object = value.as_object_mut().expect("response is an object");
         if let Some(answers) = object
             .get_mut("answers")
             .and_then(serde_json::Value::as_object_mut)
         {
             for (id, answer) in answers.iter_mut() {
-                if let Some(abstention) = abstentions.get(id)
-                    && let Some(answer) = answer.as_object_mut()
-                {
+                let Some(answer) = answer.as_object_mut() else {
+                    continue;
+                };
+                if let Some(action) = actions.get(id) {
+                    answer.insert(
+                        "action".to_owned(),
+                        serde_json::json!({ "act_probability": action }),
+                    );
+                }
+                if let Some(abstention) = abstentions.get(id) {
                     if abstention.low_confidence {
                         answer.insert("low_confidence".to_owned(), serde_json::json!(true));
                     }

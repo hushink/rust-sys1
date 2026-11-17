@@ -56,15 +56,20 @@ def main() -> int:
     session = ort.InferenceSession(
         str(args.onnx / "model.onnx"), providers=["CPUExecutionProvider"]
     )
-    output = session.run(
-        ["logits"],
+    logits, pooled = session.run(
+        ["logits", "pooled"],
         {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "type_ids": type_ids,
             "markers": np.asarray(markers, dtype=np.int64),
         },
-    )[0]
+    )
+    output = logits
+    if pooled.shape[0] != input_ids.shape[0] or pooled.ndim != 2:
+        raise ValueError(
+            f"expected pooled [batch={input_ids.shape[0]}, hidden], got {pooled.shape}"
+        )
     expected = np.asarray(case["logits"], dtype=np.float32)
     expected_values = np.asarray(
         [expected[row][column] for row, column in locations], dtype=np.float32
@@ -73,6 +78,7 @@ def main() -> int:
     difference = np.abs(output - expected_values)
     worst = float(difference.max()) if difference.size else 0.0
     print(f"markers: {len(markers)}")
+    print(f"pooled: {tuple(pooled.shape)}")
     print(f"max |onnx - golden|: {worst:.9g}")
     if worst > args.tolerance:
         worst_index = int(difference.argmax())

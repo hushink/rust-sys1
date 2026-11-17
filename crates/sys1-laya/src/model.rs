@@ -118,13 +118,21 @@ impl HeadLayer {
     }
 }
 
-struct ActHead {
+pub(crate) struct ActHead {
     input: Linear,
     output: Linear,
     compute_dtype: DType,
 }
 
 impl ActHead {
+    pub(crate) fn from_parts(input: Linear, output: Linear, compute_dtype: DType) -> Self {
+        Self {
+            input,
+            output,
+            compute_dtype,
+        }
+    }
+
     fn load(
         vb: VarBuilder,
         hidden: usize,
@@ -156,7 +164,7 @@ impl ActHead {
         }))
     }
 
-    fn forward(&self, pooled: &Tensor, logits: &[f32]) -> candle_core::Result<f32> {
+    pub(crate) fn forward(&self, pooled: &Tensor, logits: &[f32]) -> candle_core::Result<f32> {
         if logits.is_empty() {
             return Ok(0.5);
         }
