@@ -125,6 +125,7 @@ pub(crate) struct ActHead {
 }
 
 impl ActHead {
+    #[cfg_attr(not(feature = "onnx"), allow(dead_code))]
     pub(crate) fn from_parts(input: Linear, output: Linear, compute_dtype: DType) -> Self {
         Self {
             input,

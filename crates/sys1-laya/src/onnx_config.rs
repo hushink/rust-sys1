@@ -6,6 +6,7 @@ use sys1_core::ModelError;
 /// Optional sidecar that customizes the ONNX scoring contract.
 pub(crate) const ONNX_SIDECAR: &str = "onnx.json";
 /// Conventional act-head weights file written by the exporter.
+#[cfg_attr(not(feature = "onnx"), allow(dead_code))]
 pub(crate) const DEFAULT_ACT_HEAD: &str = "act_head.safetensors";
 
 fn default_model() -> String {
@@ -110,6 +111,7 @@ impl OnnxFileConfig {
     ///
     /// An explicit `act_head` must exist. Without one, a conventional
     /// `act_head.safetensors` beside the model enables the head automatically.
+    #[cfg_attr(not(feature = "onnx"), allow(dead_code))]
     pub(crate) fn act_head_path(&self, directory: &Path) -> Result<Option<PathBuf>, ModelError> {
         let path = match &self.act_head {
             Some(value) => Some(resolve_inside(directory, value, "onnx act_head path")?),
@@ -130,6 +132,7 @@ impl OnnxFileConfig {
     }
 
     /// The pooled output name to request when an act head is enabled.
+    #[cfg_attr(not(feature = "onnx"), allow(dead_code))]
     pub(crate) fn pooled_output(&self, has_act_head: bool) -> Option<String> {
         self.pooled_output
             .clone()
