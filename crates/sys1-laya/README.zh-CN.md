@@ -77,8 +77,34 @@ session 时动态加载：设置 `ORT_DYLIB_PATH` 指向 `onnxruntime` 共享库
 
 执行提供器 feature：`ort-cuda`、`ort-tensorrt`、`ort-directml`、`ort-coreml`
 （均隐含 `onnx`）。TensorRT 需要本机 TensorRT SDK。官方尚未发布 Laya ONNX
-产物；需使用符合上述契约的导出器。仓库测试使用合成计算图验证 batching、padding、
-marker 索引与 factory 接线，不验证与 candle checkpoint 的数值一致性。
+产物；仓库提供纯 NumPy/ONNX 导出器（不依赖 PyTorch）：
+
+```bash
+uv run --with onnx --with safetensors --with numpy --python 3.13 \
+  ../../scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+
+uv run --with onnxruntime --with numpy --python 3.13 \
+  ../../scripts/check_laya_onnx.py /path/to/laya-onnx \
+  /path/to/golden/multilingual/case_dict_state.json
+```
+
+导出器写出 F32 权重（multilingual 约 1.2 GiB，大模型约 1.6 GiB），复制
+tokenizer 与 `rl_agent_config.json`，并生成 `onnx.json`。三个 checkpoint 的
+导出 logits 均与官方 golden 对比：最大 `|ONNX - golden|` 为 1.7e-6 到 2.5e-6。
+
+Rust 端到端一致性测试会比较 candle 与 ONNX 的答案：
+
+```powershell
+$env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
+$env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
+$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
+cargo test -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
+```
+
+多 GB 导出请使用较新的 ONNX Runtime。Windows 上 ONNX Runtime 1.17 在加载
+1.2 GiB multilingual 计算图时 session 创建不稳定；1.32 可稳定加载运行。
+将 `ORT_DYLIB_PATH` 指向较新的库即可。合成计算图测试仍覆盖 batching、padding、
+marker 索引与 factory 接线。
 
 ## 示例
 

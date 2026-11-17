@@ -80,10 +80,37 @@ Builds never download runtime binaries. The binding targets ONNX Runtime API
 
 Execution-provider features: `ort-cuda`, `ort-tensorrt`, `ort-directml`, and
 `ort-coreml` (each implies `onnx`). TensorRT requires a local TensorRT SDK.
-No official Laya ONNX artifact is published yet; use an exporter that follows
-the contract above. The repository tests use a synthetic graph to verify
-batching, padding, marker indexing, and factory wiring, not numerical parity
-with the candle checkpoint.
+No official Laya ONNX artifact is published yet. The repository includes a
+pure NumPy/ONNX exporter (no PyTorch) that implements the contract above:
+
+```bash
+uv run --with onnx --with safetensors --with numpy --python 3.13 \
+  ../../scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+
+uv run --with onnxruntime --with numpy --python 3.13 \
+  ../../scripts/check_laya_onnx.py /path/to/laya-onnx \
+  /path/to/golden/multilingual/case_dict_state.json
+```
+
+The exporter writes F32 weights (~1.2 GiB for multilingual, ~1.6 GiB for the
+large checkpoints), copies the tokenizer and `rl_agent_config.json`, and writes
+`onnx.json`. Exported logits were checked against the official golden vectors
+for all three checkpoints: max `|ONNX - golden|` was 1.7e-6 to 2.5e-6.
+
+The Rust end-to-end parity test compares candle and ONNX answers:
+
+```powershell
+$env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
+$env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
+$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
+cargo test -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
+```
+
+For the multi-gigabyte exports, use a current ONNX Runtime build. On Windows,
+ONNX Runtime 1.17 was unstable during session creation for the 1.2 GiB
+multilingual graph; 1.32 loaded and ran it reliably. Set `ORT_DYLIB_PATH` to the
+newer library. The synthetic graph tests still cover batching, padding, marker
+indexing, and factory wiring.
 
 ## Example
 

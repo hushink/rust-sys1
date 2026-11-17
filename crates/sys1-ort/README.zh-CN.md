@@ -46,6 +46,8 @@ state，并输出形状 `[n]` 的 float32 `logits`。batch 与 seq 轴必须是�
 创建 session 时通过 `ORT_DYLIB_PATH` 或平台加载路径查找共享库。每个进程只尝试
 加载一次；结果（包括解析后的路径）会被缓存，失败以 `OrtError::Runtime` 返回，
 不会 panic。绑定以 API 17 为目标，适用于 ONNX Runtime 1.17 及更新版本。
+多 GB 模型建议使用较新的运行时：Windows 上 ONNX Runtime 1.17 在加载 1.2 GiB
+计算图时 session 创建不稳定，1.32 可稳定加载。
 
 执行提供器是 Cargo features：`cuda`、`tensorrt`、`directml`、`coreml`。它们
 跟随 `ort` crate，需要安装对应的运行时与 SDK。TensorRT 仅能通过该执行提供器路径使用。

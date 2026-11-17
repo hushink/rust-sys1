@@ -37,11 +37,13 @@ The CLI enables the `onnx` feature by default. A directory containing
 
 ```bash
 sys1 serve --model laya-onnx=local:/path/to/laya-onnx
+sys1 run local:/path/to/laya-onnx --input request.json
 ```
 
 ONNX Runtime is loaded dynamically at model load time. Set `ORT_DYLIB_PATH` to
 the `onnxruntime` shared library, or install it on the platform loader path.
-The graph input/output contract and the optional `onnx.json` fields are
+Use a current ONNX Runtime for multi-gigabyte exports. The graph input/output
+contract, optional `onnx.json` fields, and the pure NumPy exporter are
 documented in [`sys1-laya`](../sys1-laya/README.md#onnx-runtime-backend).
 The CLI `pull`/`show` paths also accept ONNX manifests
 (`backend = "onnx"`, `format = "onnx"`).

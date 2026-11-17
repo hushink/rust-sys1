@@ -49,7 +49,9 @@ Runtime at build time. At session creation, resolve the shared library via
 `ORT_DYLIB_PATH` or the platform loader search path. Loading is attempted once
 per process; the result (including the resolved path) is cached, and a failure
 is returned as `OrtError::Runtime` instead of panicking. The binding targets API
-17; ONNX Runtime 1.17 and newer work.
+17; ONNX Runtime 1.17 and newer work. For multi-gigabyte models, prefer a
+current runtime: ONNX Runtime 1.17 was unstable during session creation for a
+1.2 GiB graph on Windows, while 1.32 loaded it reliably.
 
 Execution providers are Cargo features: `cuda`, `tensorrt`, `directml`, and
 `coreml`. They follow the `ort` crate and require the corresponding runtime

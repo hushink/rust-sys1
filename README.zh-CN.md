@@ -15,6 +15,7 @@
 - `InferenceEngine`：一个对象串起 hub、manifest、后端 factory、注册表与 typed 推理。
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
 - 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
+- 纯 NumPy 的 Laya→ONNX 导出器，与官方 golden logits 最大误差 2.5e-6。
 - 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁。
 - 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理。
@@ -68,8 +69,23 @@ tokenizer/tokenizer.json
 ```
 
 ONNX 导出则提供 `model.onnx`（或 `onnx.json` 指定的文件）、`rl_agent_config.json`
-与 tokenizer。计算图契约见
+与 tokenizer。可用纯 NumPy/ONNX 导出器（不依赖 PyTorch）生成，并对官方 golden
+logits 做校验：
+
+```bash
+uv run --with onnx --with safetensors --with numpy --python 3.13 \
+  scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+
+uv run --with onnxruntime --with numpy --python 3.13 \
+  scripts/check_laya_onnx.py /path/to/laya-onnx \
+  /path/to/golden/multilingual/case_dict_state.json
+```
+
+三个 checkpoint 均与官方 golden logits 对齐，最大 `|ONNX - golden|` 在
+1.7e-6 到 2.5e-6 之间。计算图契约见
 [`sys1-laya` ONNX 后端](crates/sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
+多 GB 计算图请使用较新的 ONNX Runtime；Windows 上 1.17 加载 1.2 GiB
+multilingual 导出不稳定，1.32 正常。
 
 ### 启动服务
 
@@ -501,7 +517,16 @@ $env:ORT_DYLIB_PATH="C:/path/to/onnxruntime.dll"
 $env:SYS1_REQUIRE_ORT="1"
 cargo test --offline -p sys1-ort
 cargo test --offline -p sys1-laya --features onnx
+
+# candle 与 ONNX 的完整答案一致性（官方 golden case）
+$env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
+$env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
+$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
+cargo test --offline -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
 ```
+
+导出器在三个 checkpoint 上的 logits 与官方 golden 最大误差 2.5e-6；
+Rust parity 测试进一步比较完整答案对象。
 
 Hub 测试会启动本地回环模型中心，覆盖静态 manifest、Bearer token、Range
 断点续传、HF 分页/子目录/LFS hash，以及 ModelScope token 头与 3000 条截断拆分。
@@ -524,9 +549,9 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 ## 已知缺口 / Roadmap
 
 - zstd 请求压缩。
-- 真实的 Laya ONNX 导出产物。可选 ORT 后端、动态加载、合成契约测试与 factory 接线已实现；
-  官方尚未发布 ONNX 产物。TensorRT 仍只能通过 ORT TensorRT EP 使用。
 - TensorRT EP 的 CI 需要安装了 TensorRT 的 self-hosted GPU runner。
+- 上游发布的 Laya ONNX 产物。仓库内的导出器已能本地生成并完成 golden 对齐；
+  TensorRT 仍只能通过 ORT TensorRT EP 使用。
 - long context 扫描、act head、abstention、parallel option layout（v1.1）。
 - 长上下文 FlashAttention：用 hdim64-only candle-flash-attn + CUDA 13.3 的原型
   把 932 token 延迟从 ~181 ms 降到 ~69 ms，但答案与 eager/F32 不一致；上游完整

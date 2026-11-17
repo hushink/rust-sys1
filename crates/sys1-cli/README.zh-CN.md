@@ -36,11 +36,13 @@ CLI 默认启用 `onnx` feature。包含 `model.onnx`（或由 `onnx.json` 指�
 
 ```bash
 sys1 serve --model laya-onnx=local:/path/to/laya-onnx
+sys1 run local:/path/to/laya-onnx --input request.json
 ```
 
 ONNX Runtime 在加载模型时动态加载。设置 `ORT_DYLIB_PATH` 指向 `onnxruntime`
-共享库，或将其安装到平台加载路径。计算图输入/输出契约与可选 `onnx.json`
-字段见 [`sys1-laya`](../sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
+共享库，或将其安装到平台加载路径。多 GB 导出建议使用较新的 ONNX Runtime。
+计算图输入/输出契约、可选 `onnx.json` 字段与纯 NumPy 导出器见
+[`sys1-laya`](../sys1-laya/README.zh-CN.md#onnx-runtime-后端)。
 CLI 的 `pull`/`show` 也接受 ONNX manifest（`backend = "onnx"`、`format = "onnx"`）。
 
 ## 启动服务

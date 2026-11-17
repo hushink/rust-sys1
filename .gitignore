@@ -2,3 +2,5 @@
 /target-*
 /.idea/
 /sys1.toml
+__pycache__/
+*.pyc

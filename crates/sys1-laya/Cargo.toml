@@ -23,6 +23,10 @@ tracing.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 
+[[example]]
+name = "onnx_load"
+required-features = ["onnx"]
+
 [features]
 default = []
 onnx = ["dep:sys1-ort"]

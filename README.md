@@ -15,6 +15,7 @@ Type-safe in-process System One inference plus a TypeSafe-compatible HTTP servic
 - `InferenceEngine`: one object wires the hub, manifest, backend factory, registry, and typed inference.
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
 - Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
+- Pure NumPy Laya-to-ONNX exporter with official golden logits within 2.5e-6.
 - Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock.
 - Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference.
@@ -69,8 +70,24 @@ tokenizer/tokenizer.json
 ```
 
 An ONNX export instead provides `model.onnx` (or the file named by
-`onnx.json`), `rl_agent_config.json`, and a tokenizer. See the
+`onnx.json`), `rl_agent_config.json`, and a tokenizer. Export one with the
+pure NumPy/ONNX translator (no PyTorch), then check it against the official
+golden logits:
+
+```bash
+uv run --with onnx --with safetensors --with numpy --python 3.13 \
+  scripts/export_laya_onnx.py /path/to/laya-multilingual /path/to/laya-onnx
+
+uv run --with onnxruntime --with numpy --python 3.13 \
+  scripts/check_laya_onnx.py /path/to/laya-onnx \
+  /path/to/golden/multilingual/case_dict_state.json
+```
+
+All three checkpoints matched the official golden logits with max
+`|ONNX - golden|` between 1.7e-6 and 2.5e-6. See the
 [`sys1-laya` ONNX contract](crates/sys1-laya/README.md#onnx-runtime-backend).
+Use a current ONNX Runtime for these multi-gigabyte graphs; 1.17 was unstable
+on Windows for the 1.2 GiB multilingual export, while 1.32 worked.
 
 ### Serve
 
@@ -537,7 +554,16 @@ $env:ORT_DYLIB_PATH="C:/path/to/onnxruntime.dll"
 $env:SYS1_REQUIRE_ORT="1"
 cargo test --offline -p sys1-ort
 cargo test --offline -p sys1-laya --features onnx
+
+# Candle-vs-ONNX parity: full answers on the official golden case
+$env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
+$env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
+$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
+cargo test --offline -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
 ```
+
+The exporter produced logits within 2.5e-6 of the official golden vectors for
+all three checkpoints; the Rust parity test compares the full answer objects.
 
 Hub tests spin up loopback model centers and cover static HTTP manifests,
 Bearer tokens, Range-resumed downloads, HF pagination/subfolders/LFS hashes,
@@ -562,10 +588,10 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 ## Known gaps / roadmap
 
 - zstd request compression.
-- A real Laya ONNX export. The optional ORT backend, dynamic loading, synthetic
-  contract tests, and factory wiring are implemented; no official ONNX artifact
-  is published. TensorRT remains available only through the ORT TensorRT EP.
 - TensorRT EP CI requires a self-hosted GPU runner with TensorRT installed.
+- A published upstream Laya ONNX artifact. The repository exporter now produces
+  parity-checked models locally; TensorRT remains available only through the
+  ORT TensorRT EP.
 - Long-context scanning, act head, abstention, parallel option layout (v1.1).
 - FlashAttention for long contexts: a prototype built with a hdim64-only
   candle-flash-attn + CUDA 13.3 and ran at ~69 ms vs ~181 ms for a 932-token

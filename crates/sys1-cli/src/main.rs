@@ -476,7 +476,24 @@ fn run_command(
     .context("invalid questions")?;
     let questions = Questions::from(questions);
 
-    let model = CheckpointModel::load_dir(&pulled.directory, options)?;
+    let model: Arc<dyn DecisionModel> = if pulled.manifest.backend == "onnx" {
+        #[cfg(feature = "onnx")]
+        {
+            Arc::new(sys1_laya::LayaOnnxModel::load_dir(
+                &pulled.directory,
+                options,
+            )?)
+        }
+        #[cfg(not(feature = "onnx"))]
+        {
+            bail!(
+                "model `{}` is ONNX, but this build of sys1-cli has the `onnx` feature disabled",
+                pulled.manifest.name
+            )
+        }
+    } else {
+        Arc::new(CheckpointModel::load_dir(&pulled.directory, options)?)
+    };
     let output = model.predict(&state, &questions)?;
     let response = SystemOneResponse {
         model: pulled.manifest.name,

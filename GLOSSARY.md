@@ -137,3 +137,7 @@ _Avoid_: ONNX API、tokenizer contract
 **ONNX export（ONNX 导出）**：
 与某个 checkpoint 共用 tokenizer、`rl_agent_config.json` 和答案语义，但以前向计算图（`model.onnx`）替代 safetensors 权重的模型目录。
 _Avoid_: ONNX checkpoint（易与 safetensors checkpoint 混淆，但可接受）
+
+**ONNX exporter（ONNX 导出器）**：
+把 safetensors 权重和模型配置翻译成 scoring contract 计算图的离线工具；当前实现为 `scripts/export_laya_onnx.py`。
+_Avoid_: Converter（未说明方向）、compiler
