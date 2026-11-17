@@ -14,6 +14,10 @@ rust-sys1 的核心 trait、manifest、模型注册表、typed 进程内 API 与
 - `ModelRegistry`：名称/别名解析、懒加载、LRU、`keep_alive`、卸载，以及运行时
   `register` / `unregister` 修改目录。
 - `Questions` / `Answers`：typed builder 与类型化读取。
+- `PredictionOptions` / `MinConfidence`：可选的 abstention 策略，支持标量或按
+  question type / 选项数分桶。
+- `Abstention` / `AbstentionState`：每个答案的 gate 结果（`passed`、
+  `abstained` 或 `unevaluated`）。
 - `ModelManifest` / `ModelFile`：模型包契约。
 - `DevicePreference` / `ResolvedDevice`：运行时设备选择辅助类型。
 
@@ -68,6 +72,20 @@ let response = registry.predict("laya-latest", &state, &questions)?;
 - `DecisionOutput::windows` / `scored_windows` 携带长上下文归因：每个答案的
   决定 token 窗口，以及实际打分的窗口数（`predict` 为 `0`，单窗口为 `1`）。
   `predict_long_output` 对长调用复用同样的校验与注册表路径。
+- `predict_with` / `predict_batch_with` 应用 `PredictionOptions`；设置
+  `min_confidence` 后，`DecisionOutput::abstentions` 为每个答案保存 gate 结果，
+  答案本身保持不变。注册表层的对应入口是 `predict_output_with`。
+
+```rust
+use sys1_core::{MinConfidence, PredictionOptions};
+
+let options = PredictionOptions {
+    min_confidence: Some(MinConfidence::scalar(0.8)?),
+};
+let output = model.predict_with(&state, &questions, &options)?;
+let gate = output.abstention("tone").expect("gate ran");
+assert!(gate.low_confidence == (gate.state == sys1_core::AbstentionState::Abstained));
+```
 - `ModelResolver` 不属于注册表：调用方把引用解析成 manifest、注册它们，并提供
   能加载这些 manifest 的 factory。CLI 用它实现服务运行期间从 hub 添加模型。
 

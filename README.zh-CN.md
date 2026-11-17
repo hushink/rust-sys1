@@ -300,9 +300,9 @@ let billing = output.answers.noul("billing")?;
 `model`（`ModelOptions`：device、dtype、上下文长度、confidence、attention）分组。
 `engine.add("hf:...")` / `add_as` 注册引用，`load` / `unload` 控制常驻，
 `models` / `model` 查看目录，`predict_batch` 执行原生 batch，`predict_long`
-用重叠窗口扫描长 state 并返回 typed 窗口归因，`systemone` 返回官方 wire
-response。Engine 实现了 `ModelResolver`，因此也可作为服务端 `/api/models`
-运行时管理的 resolver。
+用重叠窗口扫描长 state 并返回 typed 窗口归因，`predict_with` 应用
+`min_confidence` 等逐调用控制，`systemone` 返回官方 wire response。Engine
+实现了 `ModelResolver`，因此也可作为服务端 `/api/models` 运行时管理的 resolver。
 
 原来的直接 checkpoint API 保持不变：
 
@@ -566,6 +566,9 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 
 # 长上下文扫描与官方 predict_long 输出对齐
 cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
+
+# 标量与按 bucket 的 min_confidence 与官方 gate 对齐
+cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 ```
 
 ## 已知缺口 / Roadmap
@@ -574,7 +577,7 @@ cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
 - TensorRT EP 的 CI 需要安装了 TensorRT 的 self-hosted GPU runner。
 - 上游发布的 Laya ONNX 产物。仓库内的导出器已能本地生成并完成 golden 对齐；
   TensorRT 仍只能通过 ORT TensorRT EP 使用。
-- abstention（`min_confidence`）与 parallel option layout（v1.1）。
+- parallel option layout（v1.1）。
 - 长上下文 FlashAttention：用 hdim64-only candle-flash-attn + CUDA 13.3 的原型
   把 932 token 延迟从 ~181 ms 降到 ~69 ms，但答案与 eager/F32 不一致；上游完整
   构建在 CUDA 13.4/Windows 上还遇到 `cicc` access violation。数值对齐前不合并。

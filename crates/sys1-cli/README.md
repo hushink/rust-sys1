@@ -286,6 +286,10 @@ sys1 run local:/path/to/laya-multilingual --input request.json
 # Scan a document longer than the checkpoint's context window
 sys1 run local:/path/to/laya-multilingual --input long.json \
   --long --window 512 --stride 256
+
+# Abstain when answer confidence falls below a threshold
+sys1 run local:/path/to/laya-multilingual --input request.json \
+  --min-confidence 0.8
 ```
 
 With `--long`, each answer gains a `window` object (`index`, `token_start`,
@@ -293,6 +297,12 @@ With `--long`, each answer gains a `window` object (`index`, `token_start`,
 scored. A state that fits one window takes the ordinary single-call path.
 `--stride` must not exceed the effective window; `--long-batch` bounds windows
 per forward pass.
+
+With `--min-confidence`, each answer gains `abstention` (`passed`,
+`abstained`, or `unevaluated`) and `abstention_threshold`; `low_confidence:
+true` appears only on abstained answers. The gate compares the largest answer
+probability, not the reported confidence, and is not supported with `--long`.
+The typed API additionally accepts per-bucket threshold maps.
 
 ## Benchmark
 

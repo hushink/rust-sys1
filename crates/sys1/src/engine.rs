@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use sys1_core::{
     DecisionOutput, Error as RegistryError, LongContextOptions, ManifestError, ModelError,
-    ModelManifest, ModelRegistry, ModelResolver, Prediction, Questions, RegistryConfig,
+    ModelManifest, ModelRegistry, ModelResolver, Prediction, PredictionOptions, Questions,
+    RegistryConfig,
 };
 use sys1_hub::{CacheResidency, Hub, HubConfig, HubError, ModelRef};
 use sys1_laya::{
@@ -192,6 +193,19 @@ impl InferenceEngine {
         Ok(self.registry.predict_output(model, state, questions)?)
     }
 
+    /// Run one prediction with per-call controls such as `min_confidence`.
+    pub fn predict_with(
+        &self,
+        model: &str,
+        state: &State,
+        questions: &Questions,
+        options: &PredictionOptions,
+    ) -> Result<DecisionOutput, EngineError> {
+        Ok(self
+            .registry
+            .predict_output_with(model, state, questions, options)?)
+    }
+
     /// Scan a long state in overlapping windows and return typed answers with
     /// window attribution.
     pub fn predict_long(
@@ -238,6 +252,27 @@ impl InferenceEngine {
         self.registry.maintenance();
         let model = self.registry.acquire(model)?;
         Ok(model.predict_batch(requests))
+    }
+
+    /// Batched inference with per-call controls applied to each result.
+    pub fn predict_batch_with(
+        &self,
+        model: &str,
+        requests: &[Prediction<'_>],
+        options: &PredictionOptions,
+    ) -> Result<Vec<Result<DecisionOutput, ModelError>>, EngineError> {
+        for request in requests {
+            request
+                .questions
+                .validate()
+                .map_err(RegistryError::Validation)?;
+        }
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.registry.maintenance();
+        let model = self.registry.acquire(model)?;
+        Ok(model.predict_batch_with(requests, options))
     }
 
     fn add_inner(

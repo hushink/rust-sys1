@@ -183,6 +183,35 @@ assert_eq!(deciding.count, output.scored_windows);
 `predict_long` 对比：答案、`action.act_probability`、窗口归因与
 `usage.input_tokens` 一致。
 
+## Abstention
+
+`predict_with` 在推理后应用官方 `min_confidence` gate：
+
+```rust
+use sys1_core::{MinConfidence, PredictionOptions};
+
+let output = model.predict_with(
+    &state,
+    &questions,
+    &PredictionOptions {
+        min_confidence: Some(MinConfidence::scalar(0.9)?),
+    },
+)?;
+let gate = output.abstention("urgency").expect("gate ran");
+```
+
+- `answer_confidence` 是答案概率的最大值（`noul` 即其 P(true)）；概率缺失时回退到
+  报告中的 confidence。
+- 标量作用于所有答案。`MinConfidence::buckets` 接受 `choice:2` / `choice:3-5` /
+  `choice:6-10` / `choice:11+`、对应的 `score` 与 `noul` 键，以及 `default`；
+  未命名的 bucket 先回退到 `default`，再回退到 `0.0`（不 gate）。
+- `AbstentionState` 为 `passed`、`abstained` 或 `unevaluated`（答案没有可用
+  confidence）。只有 `abstained` 的 `low_confidence` 为 true。
+- 答案本身与官方 wire 响应不变。阈值为 `0.0` 时仍会运行 gate，所有可评估答案
+  都报告 `passed`。
+- 与官方 API 一致，`predict_long` 不接受 `min_confidence`；窗口循环没有单一的
+  confidence 可供 gate。
+
 ## Router
 
 `LayaRouter::new(root, options)` 需要 Laya 仓库根目录（含 `english/`、

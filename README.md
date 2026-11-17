@@ -321,9 +321,10 @@ let billing = output.answers.noul("billing")?;
 confidence, attention). `engine.add("hf:...")` / `add_as` register references,
 `load` / `unload` control residency, `models` / `model` inspect the catalog,
 `predict_batch` runs a native batch, `predict_long` scans a long state in
-overlapping windows with typed window attribution, and `systemone` returns the
-official wire response. The engine implements `ModelResolver`, so it can also
-back the server's `/api/models` runtime management.
+overlapping windows with typed window attribution, `predict_with` applies
+per-call controls such as `min_confidence` abstention, and `systemone` returns
+the official wire response. The engine implements `ModelResolver`, so it can
+also back the server's `/api/models` runtime management.
 
 The original direct checkpoint API is unchanged:
 
@@ -609,6 +610,9 @@ cargo test --release -p sys1-laya --features cuda --test long_context -- --ignor
 
 # Long-context scanning against the official predict_long output
 cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
+
+# Scalar and per-bucket min_confidence against the official gate
+cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 ```
 
 ## Known gaps / roadmap
@@ -618,7 +622,7 @@ cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
 - A published upstream Laya ONNX artifact. The repository exporter now produces
   parity-checked models locally; TensorRT remains available only through the
   ORT TensorRT EP.
-- Abstention (`min_confidence`) and parallel option layout (v1.1).
+- Parallel option layout (v1.1).
 - FlashAttention for long contexts: a prototype built with a hdim64-only
   candle-flash-attn + CUDA 13.3 and ran at ~69 ms vs ~181 ms for a 932-token
   state, but diverged from eager/F32 answers. The upstream full build with

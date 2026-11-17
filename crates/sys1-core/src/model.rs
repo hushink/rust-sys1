@@ -46,6 +46,21 @@ pub struct WindowAttribution {
 pub trait DecisionModel: Send + Sync {
     fn predict(&self, state: &State, questions: &Questions) -> Result<DecisionOutput, ModelError>;
 
+    /// Run `predict` with per-call controls, applying the optional
+    /// `min_confidence` abstention gate to the typed output.
+    fn predict_with(
+        &self,
+        state: &State,
+        questions: &Questions,
+        options: &crate::abstention::PredictionOptions,
+    ) -> Result<DecisionOutput, ModelError> {
+        let mut output = self.predict(state, questions)?;
+        if let Some(policy) = &options.min_confidence {
+            crate::abstention::apply_abstention(&mut output, policy)?;
+        }
+        Ok(output)
+    }
+
     /// Scan a state in overlapping windows when it exceeds the context window,
     /// then aggregate per-question answers.
     ///
@@ -80,6 +95,27 @@ pub trait DecisionModel: Send + Sync {
         requests
             .iter()
             .map(|request| self.predict(request.state, request.questions))
+            .collect()
+    }
+
+    /// Batched inference with the same per-call controls as [`Self::predict_with`].
+    ///
+    /// The gate is post-hoc, so models keep their own batching implementation.
+    fn predict_batch_with(
+        &self,
+        requests: &[Prediction<'_>],
+        options: &crate::abstention::PredictionOptions,
+    ) -> Vec<Result<DecisionOutput, ModelError>> {
+        self.predict_batch(requests)
+            .into_iter()
+            .map(|result| {
+                result.and_then(|mut output| {
+                    if let Some(policy) = &options.min_confidence {
+                        crate::abstention::apply_abstention(&mut output, policy)?;
+                    }
+                    Ok(output)
+                })
+            })
             .collect()
     }
 }
@@ -133,6 +169,10 @@ pub struct DecisionOutput {
     /// normal `predict`, `1` when the state fit one window, and `N` for a
     /// scanned document.
     pub scored_windows: usize,
+    /// Opt-in abstention results, one per answer, when a `min_confidence`
+    /// policy ran. Empty when no gate ran. Like `actions`, this is a typed
+    /// extension that is not part of the official wire response.
+    pub abstentions: IndexMap<String, crate::abstention::Abstention>,
 }
 
 impl DecisionOutput {
@@ -143,6 +183,7 @@ impl DecisionOutput {
             actions: IndexMap::new(),
             windows: IndexMap::new(),
             scored_windows: 0,
+            abstentions: IndexMap::new(),
         }
     }
 
@@ -167,6 +208,10 @@ impl DecisionOutput {
 
     pub fn window(&self, id: &str) -> Option<&WindowAttribution> {
         self.windows.get(id)
+    }
+
+    pub fn abstention(&self, id: &str) -> Option<&crate::abstention::Abstention> {
+        self.abstentions.get(id)
     }
 }
 

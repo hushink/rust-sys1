@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sys1_core::{
-    DecisionModel, DevicePreference, LongContextOptions, ModelManifest, ModelRegistry,
-    ModelResolver, Questions, RegistryConfig,
+    DecisionModel, DevicePreference, LongContextOptions, MinConfidence, ModelManifest,
+    ModelRegistry, ModelResolver, PredictionOptions, Questions, RegistryConfig,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
 use sys1_laya::{
@@ -213,6 +213,9 @@ struct RunArgs {
     /// Maximum windows per forward pass.
     #[arg(long, value_name = "WINDOWS")]
     long_batch: Option<usize>,
+    /// Abstain when answer confidence is below this threshold (0.0-1.0).
+    #[arg(long, value_name = "FLOAT")]
+    min_confidence: Option<f64>,
     /// Allow TF32 tensor-core reductions for F32 CUDA GEMMs.
     #[arg(long)]
     tf32: bool,
@@ -583,6 +586,12 @@ fn run_command(
     } else {
         Arc::new(CheckpointModel::load_dir(&pulled.directory, options)?)
     };
+    let prediction_options = PredictionOptions {
+        min_confidence: args.min_confidence.map(MinConfidence::scalar).transpose()?,
+    };
+    if args.long && prediction_options.min_confidence.is_some() {
+        bail!("--min-confidence is not supported with --long; gate the aggregated result instead");
+    }
     let output = if args.long {
         model.predict_long(
             &state,
@@ -594,13 +603,14 @@ fn run_command(
             },
         )?
     } else {
-        model.predict(&state, &questions)?
+        model.predict_with(&state, &questions, &prediction_options)?
     };
     let sys1_core::DecisionOutput {
         answers,
         usage,
         windows,
         scored_windows,
+        abstentions,
         ..
     } = output;
     let response = SystemOneResponse {
@@ -628,6 +638,31 @@ fn run_command(
             .and_then(serde_json::Value::as_object_mut)
         {
             usage.insert("windows".to_owned(), serde_json::json!(scored_windows));
+        }
+    }
+    if !abstentions.is_empty() {
+        let object = value.as_object_mut().expect("response is an object");
+        if let Some(answers) = object
+            .get_mut("answers")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            for (id, answer) in answers.iter_mut() {
+                if let Some(abstention) = abstentions.get(id)
+                    && let Some(answer) = answer.as_object_mut()
+                {
+                    if abstention.low_confidence {
+                        answer.insert("low_confidence".to_owned(), serde_json::json!(true));
+                    }
+                    answer.insert(
+                        "abstention".to_owned(),
+                        serde_json::to_value(abstention.state)?,
+                    );
+                    answer.insert(
+                        "abstention_threshold".to_owned(),
+                        serde_json::json!(abstention.threshold),
+                    );
+                }
+            }
         }
     }
     println!("{}", serde_json::to_string_pretty(&value)?);

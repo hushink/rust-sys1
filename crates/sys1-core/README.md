@@ -15,6 +15,10 @@ selection for rust-sys1.
 - `ModelRegistry`: name/alias resolution, lazy loading, LRU, `keep_alive`, model unload,
   plus runtime `register` / `unregister` of catalog entries.
 - `Questions` / `Answers`: typed builders and typed accessors.
+- `PredictionOptions` / `MinConfidence`: opt-in abstention, scalar or keyed by
+  question-type/option-count buckets.
+- `Abstention` / `AbstentionState`: the gate result for each answer
+  (`passed`, `abstained`, or `unevaluated`).
 - `ModelManifest` / `ModelFile`: the model bundle contract.
 - `DevicePreference` / `ResolvedDevice`: runtime device selection helpers.
 
@@ -73,6 +77,21 @@ let response = registry.predict("laya-latest", &state, &questions)?;
   the deciding token window per answer and the number of windows scored
   (`0` for `predict`, `1` for a state that fit one window). `predict_long_output`
   runs the same validation and registry path for long calls.
+- `predict_with` / `predict_batch_with` apply `PredictionOptions`; with
+  `min_confidence` set, `DecisionOutput::abstentions` holds one result per
+  answer and the answer payload is left untouched. `predict_output_with` is the
+  registry-level form.
+
+```rust
+use sys1_core::{MinConfidence, PredictionOptions};
+
+let options = PredictionOptions {
+    min_confidence: Some(MinConfidence::scalar(0.8)?),
+};
+let output = model.predict_with(&state, &questions, &options)?;
+let gate = output.abstention("tone").expect("gate ran");
+assert!(gate.low_confidence == (gate.state == sys1_core::AbstentionState::Abstained));
+```
 - A `ModelResolver` is not part of the registry: callers resolve a reference to
   manifests, register them, and pass a factory that can load them. The CLI uses
   this to add hub models while the server is running.

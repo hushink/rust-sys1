@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod abstention;
 mod answers;
 mod device;
 mod error;
@@ -10,6 +11,10 @@ mod model;
 mod questions;
 mod registry;
 
+pub use abstention::{
+    Abstention, AbstentionState, DEFAULT_BUCKET_KEY, MinConfidence, PredictionOptions,
+    answer_confidence, apply_abstention, bucket_key,
+};
 pub use answers::Answers;
 pub use device::{DeviceError, DeviceParseError, DevicePreference, ResolvedDevice};
 pub use error::{AnswerError, Error};

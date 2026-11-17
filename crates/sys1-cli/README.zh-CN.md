@@ -265,12 +265,22 @@ sys1 run local:/path/to/laya-multilingual --input request.json
 # 扫描超过 checkpoint 上下文窗口的长文档
 sys1 run local:/path/to/laya-multilingual --input long.json \
   --long --window 512 --stride 256
+
+# 置信度低于阈值时标记 abstention
+sys1 run local:/path/to/laya-multilingual --input request.json \
+  --min-confidence 0.8
 ```
 
 启用 `--long` 后，每个答案会增加 `window` 对象（`index`、`token_start`、
 `token_end`、`count`），`usage.windows` 报告实际打分的窗口数。能放进一个窗口的
 state 会走普通单次调用。`--stride` 不能超过有效窗口；`--long-batch` 限制每次
 前向的窗口数。
+
+启用 `--min-confidence` 后，每个答案会增加 `abstention`（`passed`、
+`abstained` 或 `unevaluated`）与 `abstention_threshold`；只有 abstained 的答案
+会出现 `low_confidence: true`。Gate 比较的是答案最大概率，而不是报告中的
+confidence；该选项不支持与 `--long` 同时使用。typed API 还支持按 bucket
+设置阈值映射。
 
 ## 压测
 

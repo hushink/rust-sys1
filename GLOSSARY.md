@@ -88,6 +88,16 @@ _Avoid_: Prediction、result
 答案所依据概率分布的峰值程度，用于判断自动执行还是升级处理；Noul 没有独立 confidence。
 _Avoid_: Probability
 
+**Answer confidence**：
+答案概率的最大值（`max(p)`），是 abstention gate 与校准使用的量；与归一化熵的
+`confidence` 不同，不能混用。
+_Avoid_: Confidence（指熵置信度时）
+
+**Abstention**：
+按 `min_confidence` 阈值决定答案是 `passed`、`abstained` 还是 `unevaluated` 的策略；
+它不修改答案本身，只附带 gate 结果与阈值。
+_Avoid_: Confidence filter、thresholding（仅指计算动作时）
+
 **Response**：
 一次 System One API 调用的完整结果，由 model、answers、usage 组成。
 _Avoid_: Answer

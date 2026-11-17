@@ -1,6 +1,6 @@
 use crate::{
     DecisionOutput, Error, LongContextOptions, ManifestError, ModelFactory, ModelManifest,
-    Questions,
+    PredictionOptions, Questions,
 };
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
@@ -319,6 +319,19 @@ impl ModelRegistry {
             .map(|(_, output)| output)
     }
 
+    /// Validate, resolve, load, and run a prediction with per-call controls
+    /// such as abstention.
+    pub fn predict_output_with(
+        &self,
+        name: &str,
+        state: &State,
+        questions: &Questions,
+        options: &PredictionOptions,
+    ) -> Result<DecisionOutput, Error> {
+        self.predict_inner_with(name, state, questions, Some(options))
+            .map(|(_, output)| output)
+    }
+
     /// Validate, resolve, load, and scan a long state, returning typed
     /// answers plus window attribution.
     pub fn predict_long_output(
@@ -365,6 +378,16 @@ impl ModelRegistry {
         state: &State,
         questions: &Questions,
     ) -> Result<(String, DecisionOutput), Error> {
+        self.predict_inner_with(name, state, questions, None)
+    }
+
+    fn predict_inner_with(
+        &self,
+        name: &str,
+        state: &State,
+        questions: &Questions,
+        options: Option<&PredictionOptions>,
+    ) -> Result<(String, DecisionOutput), Error> {
         questions.validate()?;
         self.maintenance();
 
@@ -372,12 +395,14 @@ impl ModelRegistry {
             model: name.to_owned(),
         })?;
         let model = self.acquire(&canonical)?;
-        let output = model
-            .predict(state, questions)
-            .map_err(|source| Error::Model {
-                model: canonical.clone(),
-                source,
-            })?;
+        let prediction = match options {
+            Some(options) => model.predict_with(state, questions, options),
+            None => model.predict(state, questions),
+        };
+        let output = prediction.map_err(|source| Error::Model {
+            model: canonical.clone(),
+            source,
+        })?;
         Ok((canonical, output))
     }
 

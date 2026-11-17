@@ -193,6 +193,36 @@ The English checkpoint was checked against official `predict_long` on the same
 state, questions, window, and stride: answers, `action.act_probability`, window
 attribution, and `usage.input_tokens` match.
 
+## Abstention
+
+`predict_with` applies the official `min_confidence` gate after prediction:
+
+```rust
+use sys1_core::{MinConfidence, PredictionOptions};
+
+let output = model.predict_with(
+    &state,
+    &questions,
+    &PredictionOptions {
+        min_confidence: Some(MinConfidence::scalar(0.9)?),
+    },
+)?;
+let gate = output.abstention("urgency").expect("gate ran");
+```
+
+- `answer_confidence` is the largest answer probability (`noul` is its P(true));
+  if probabilities are absent it falls back to the reported confidence.
+- A scalar applies to every answer. `MinConfidence::buckets` accepts
+  `choice:2` / `choice:3-5` / `choice:6-10` / `choice:11+`, the same `score` and
+  `noul` keys, and `default`; an unnamed bucket falls back to `default`, then
+  to `0.0` (gate nothing).
+- `AbstentionState` is `passed`, `abstained`, or `unevaluated` (the answer had
+  no usable confidence). `low_confidence` is true only for `abstained`.
+- The answer payload and the official wire response are unchanged. A threshold
+  of `0.0` still runs the gate, so every evaluated answer reports `passed`.
+- `predict_long` takes no `min_confidence`, matching the official API; the
+  window loop has no single confidence to gate on.
+
 ## Router
 
 `LayaRouter::new(root, options)` expects the Laya repository root with
