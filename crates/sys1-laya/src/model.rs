@@ -21,6 +21,9 @@ pub struct LayaOptions {
     pub confidence_mode: ConfidenceMode,
     /// Use exact sliding-window attention for local layers. Defaults to true.
     pub local_window: bool,
+    /// Bound on `batch * heads * seq_len²` for one global-attention batch.
+    /// Larger batches are split into chunks. Defaults to 64M elements.
+    pub max_attention_elements: usize,
 }
 
 impl Default for LayaOptions {
@@ -31,6 +34,7 @@ impl Default for LayaOptions {
             max_len: None,
             confidence_mode: ConfidenceMode::TypeSafe,
             local_window: true,
+            max_attention_elements: crate::DEFAULT_MAX_ATTENTION_ELEMENTS,
         }
     }
 }
@@ -122,6 +126,8 @@ pub struct LayaModel {
     device: Device,
     dtype: DType,
     compute_dtype: DType,
+    num_heads: usize,
+    max_attention_elements: usize,
     confidence_mode: ConfidenceMode,
 }
 
@@ -220,6 +226,8 @@ impl LayaModel {
             device: options.device,
             dtype: model_dtype,
             compute_dtype,
+            num_heads: encoder_config.num_attention_heads,
+            max_attention_elements: options.max_attention_elements.max(1),
             confidence_mode: options.confidence_mode,
         })
     }
@@ -247,6 +255,22 @@ impl LayaModel {
         let length = unique.iter().map(|item| item.ids.len()).max().unwrap_or(0);
         if batch == 0 || length == 0 {
             return Ok(Vec::new());
+        }
+
+        // Global layers still materialize a seq×seq score tensor. Bound it
+        // independently of the server's request batch size.
+        let per_item = self
+            .num_heads
+            .saturating_mul(length)
+            .saturating_mul(length)
+            .max(1);
+        let max_batch = (self.max_attention_elements / per_item).max(1);
+        if batch > max_batch {
+            let mut output = Vec::with_capacity(batch);
+            for chunk in unique.chunks(max_batch) {
+                output.extend(self.forward_items(chunk)?);
+            }
+            return Ok(output);
         }
 
         let mut ids = vec![self.tokenizer.pad_id; batch * length];

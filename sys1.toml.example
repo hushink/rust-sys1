@@ -25,6 +25,7 @@ cache_dir = "D:/models/sys1-cache"
 # laya_confidence = "typesafe" # typesafe | laya
 # batch_max = 32
 # batch_wait_ms = 2
+# max_attention_elements = 67108864  # batch*heads*seq² cap per forward chunk
 # batch = true                 # false disables cross-request batching
 # tf32 = false                 # F32 CUDA GEMMs
 # local_window = true          # exact local-window attention (CUDA, >=512 tokens)

@@ -17,7 +17,9 @@ use sys1_core::{
     RegistryConfig,
 };
 use sys1_hub::{Hub, HubConfig, ModelRef, PulledModel};
-use sys1_laya::{ConfidenceMode, LayaFactory, LayaModel, LayaOptions, set_tf32};
+use sys1_laya::{
+    ConfidenceMode, DEFAULT_MAX_ATTENTION_ELEMENTS, LayaFactory, LayaModel, LayaOptions, set_tf32,
+};
 use sys1_protocol::{Question, State, SystemOneResponse};
 use sys1_server::{BatchConfig, ServerConfig, serve};
 use tracing_subscriber::EnvFilter;
@@ -84,6 +86,10 @@ struct ServeArgs {
     /// Maximum wait to collect a batch, in milliseconds (default: 2).
     #[arg(long)]
     batch_wait_ms: Option<u64>,
+    /// Cap for batch * heads * seq_len² in one global-attention batch
+    /// (default: 64M elements).
+    #[arg(long)]
+    max_attention_elements: Option<usize>,
     /// Disable cross-request batching.
     #[arg(long)]
     no_batch: bool,
@@ -123,6 +129,10 @@ struct RunArgs {
     dtype: Option<String>,
     #[arg(long)]
     max_len: Option<usize>,
+    /// Cap for batch * heads * seq_len² in one global-attention batch
+    /// (default: 64M elements).
+    #[arg(long)]
+    max_attention_elements: Option<usize>,
     /// Confidence mode: typesafe or laya (default: typesafe).
     #[arg(long)]
     laya_confidence: Option<String>,
@@ -222,10 +232,21 @@ fn serve_command(
         .or_else(|| server.laya_confidence.clone())
         .unwrap_or_else(|| "typesafe".to_owned());
     let max_len = args.max_len.or(server.max_len);
+    let max_attention_elements = args
+        .max_attention_elements
+        .or(server.max_attention_elements)
+        .unwrap_or(DEFAULT_MAX_ATTENTION_ELEMENTS);
     let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
-    let options = make_laya_options(&device, &dtype, max_len, &confidence, local_window)?;
+    let options = make_laya_options(
+        &device,
+        &dtype,
+        max_len,
+        &confidence,
+        local_window,
+        max_attention_elements,
+    )?;
     let specs = if args.models.is_empty() {
         config.model_specs()
     } else {
@@ -282,11 +303,22 @@ fn run_command(
         .or_else(|| server.laya_confidence.clone())
         .unwrap_or_else(|| "typesafe".to_owned());
     let max_len = args.max_len.or(server.max_len);
+    let max_attention_elements = args
+        .max_attention_elements
+        .or(server.max_attention_elements)
+        .unwrap_or(DEFAULT_MAX_ATTENTION_ELEMENTS);
     let local_window = !args.no_local_window && server.local_window.unwrap_or(true);
     let tf32 = args.tf32 || server.tf32.unwrap_or(false);
     set_tf32(tf32);
     let hub = make_hub(cache, offline, config)?;
-    let options = make_laya_options(&device, &dtype, max_len, &confidence, local_window)?;
+    let options = make_laya_options(
+        &device,
+        &dtype,
+        max_len,
+        &confidence,
+        local_window,
+        max_attention_elements,
+    )?;
     let reference = config.model_reference(&args.reference);
     let pulled = pull_model(&hub, &reference)?;
     let input = read_input(&args.input)?;
@@ -408,6 +440,7 @@ fn make_laya_options(
     max_len: Option<usize>,
     confidence: &str,
     local_window: bool,
+    max_attention_elements: usize,
 ) -> anyhow::Result<LayaOptions> {
     Ok(LayaOptions {
         device: resolve_device(device)?,
@@ -415,6 +448,7 @@ fn make_laya_options(
         max_len,
         confidence_mode: parse_confidence(confidence)?,
         local_window,
+        max_attention_elements,
     })
 }
 

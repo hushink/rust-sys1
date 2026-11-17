@@ -30,6 +30,9 @@ pub fn set_tf32(enabled: bool) {
     let _ = enabled;
 }
 
+/// Default bound on `batch * heads * seq_len²` for one global-attention batch.
+pub const DEFAULT_MAX_ATTENTION_ELEMENTS: usize = 64 * 1024 * 1024;
+
 pub const LAYA_MODEL_ID: &str = "convaiinnovations/laya";
 pub const LAYA_MULTILINGUAL_MODEL_ID: &str = "convaiinnovations/laya-multilingual";
 pub const LAYA_TYPED_DECISIONS_MODEL_ID: &str = "convaiinnovations/laya-typed-decisions";

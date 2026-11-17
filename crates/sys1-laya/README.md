@@ -52,6 +52,8 @@ let urgency = output.answers.score("urgency")?;
 - `confidence_mode`: `TypeSafe` (default) or `LayaNative`.
 - `local_window`: exact sliding-window attention for local layers on CUDA
   (default `true`, applied at ≥512 tokens); set `false` for eager attention.
+- `max_attention_elements`: cap for `batch * heads * seq_len²` in one
+  global-attention batch (default 64M elements); larger batches are split.
 
 `TypeSafe` confidence is `(K * p_max - 1) / (K - 1)`; `LayaNative` is
 `1 - H(p) / ln(K)`. `noul` answers never carry confidence, matching the official shape.

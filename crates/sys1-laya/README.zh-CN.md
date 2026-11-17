@@ -52,6 +52,8 @@ let urgency = output.answers.score("urgency")?;
 - `confidence_mode`：`TypeSafe`（默认）或 `LayaNative`。
 - `local_window`：CUDA 上 local 层的精确滑动窗口 attention（默认 `true`，
   ≥512 token 时启用）；设为 `false` 使用 eager attention。
+- `max_attention_elements`：单次 global-attention batch 的
+  `batch * heads * seq_len²` 上限（默认 64M 元素），超出会切分。
 
 `TypeSafe` confidence 为 `(K * p_max - 1) / (K - 1)`；`LayaNative` 为
 `1 - H(p) / ln(K)`。`noul` 按官方形状不携带 confidence。

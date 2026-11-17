@@ -99,6 +99,7 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 # dtype = "f16"
 # batch_max = 32
 # batch_wait_ms = 2
+# max_attention_elements = 67108864
 # local_window = true
 
 [models]

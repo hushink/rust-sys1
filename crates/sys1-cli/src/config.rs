@@ -47,6 +47,7 @@ pub struct ServerSection {
     pub laya_confidence: Option<String>,
     pub batch_max: Option<usize>,
     pub batch_wait_ms: Option<u64>,
+    pub max_attention_elements: Option<usize>,
     /// `false` disables cross-request batching.
     pub batch: Option<bool>,
     pub tf32: Option<bool>,

@@ -52,6 +52,7 @@ Useful flags:
 --laya-confidence typesafe|laya
 --batch-max 32             # requests per forward pass
 --batch-wait-ms 2          # batch collection window
+--max-attention-elements 67108864  # chunk long batches by attention memory
 --no-batch                 # disable cross-request batching
 --offline
 --cache <dir>              # or SYS1_CACHE
@@ -71,6 +72,7 @@ cache_dir = "D:/models/sys1-cache"
 device = "cuda:0"
 dtype = "f16"
 batch_max = 32
+max_attention_elements = 67108864
 
 [models]
 laya-latest = "local:D:/models/laya"

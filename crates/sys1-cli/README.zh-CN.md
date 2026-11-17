@@ -52,6 +52,7 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 --laya-confidence typesafe|laya
 --batch-max 32             # 每次前向的最大请求数
 --batch-wait-ms 2          # 收集 batch 的等待窗口
+--max-attention-elements 67108864  # 按 attention 显存切分长 batch
 --no-batch                 # 关闭跨请求 batching
 --offline
 --cache <dir>              # 或 SYS1_CACHE
@@ -70,6 +71,7 @@ cache_dir = "D:/models/sys1-cache"
 device = "cuda:0"
 dtype = "f16"
 batch_max = 32
+max_attention_elements = 67108864
 
 [models]
 laya-latest = "local:D:/models/laya"

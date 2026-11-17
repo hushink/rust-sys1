@@ -87,6 +87,7 @@ fn load(
             max_len: Some(1024),
             confidence_mode: ConfidenceMode::TypeSafe,
             local_window,
+            max_attention_elements: sys1_laya::DEFAULT_MAX_ATTENTION_ELEMENTS,
         },
     )?)
 }
