@@ -6,7 +6,7 @@ name: GPU
 on:
   workflow_dispatch:
   push:
-    branches: [master, main]
+    branches: [main]
     paths:
       - "crates/sys1-laya/**"
       - "crates/sys1-cli/**"

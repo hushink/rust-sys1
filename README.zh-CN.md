@@ -707,79 +707,21 @@ uv run sys1-bench --exe target-cuda/release/sys1.exe `
 ## 测试
 
 ```bash
-cargo test --offline --workspace
-
-# 要求运行 ORT 后端测试（缺少 dylib 时默认跳过）
-$env:ORT_DYLIB_PATH="C:/path/to/onnxruntime.dll"
-$env:SYS1_REQUIRE_ORT="1"
-cargo test --offline -p sys1-ort
-cargo test --offline -p sys1-laya --features onnx
-
-# candle 与 ONNX 的完整答案一致性（官方 golden case）
-$env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
-$env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
-$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
-cargo test --offline -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
-
-# 官方 routing golden（159 个用例）与真实 hub manifest
-$env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/route_probe.json"
-cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
-$env:SYS1_LIVE_HUB="1"
-cargo test --offline -p sys1-hub --test live -- --nocapture
-
-# Python 工具（uv workspace）
-uv sync --all-extras
-uv run --package sys1-tools --group dev ruff check python/tools
-uv run sys1-generate-scoring-stub
-
-# candle 模型族对上游 Python / transformers 参考
-$env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
-cargo test -p sys1-nli --test nli -- --ignored --nocapture
-$env:SYS1_GLICLASS_TEST_DIR="D:/models/gliclass-edge"
-cargo test -p sys1-gliclass --test gliclass -- --ignored --nocapture
-$env:SYS1_QWEN3GUARD_TEST_DIR="D:/models/qwen3guard"
-cargo test -p sys1-qwen3guard --test qwen3guard -- --ignored --nocapture
-$env:SYS1_VON_TEST_DIR="D:/models/von"
-cargo test -p sys1-von --test von -- --ignored --nocapture
-$env:SYS1_DECIMA_TEST_DIR="D:/models/decima-base"
-cargo test -p sys1-decima --test decima -- --ignored --nocapture
-$env:SYS1_KEV_TEST_DIR="D:/models/kev-0.8b"
-$env:SYS1_KEV_BASE_DIR="D:/models/qwen3.5-0.8b-base"
-cargo test -p sys1-kev --test kev -- --ignored --nocapture
-$env:SYS1_DECISION_TEST_DIR="D:/models/decision-eos-0.8b"
-cargo test -p sys1-decision --test decision -- --ignored --nocapture
-cargo test -p sys1 --test families -- --ignored --nocapture
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-导出器在三个 checkpoint 上的 logits 与官方 golden 最大误差 2.5e-6；
-Rust parity 测试进一步比较完整答案对象（含 `action.act_probability`）。
-routing 测试在每个官方 probe 上都要求 checkpoint、workflow、reason 与语言画像
-完全一致。真实 hub 测试会访问 Hugging Face 与 ModelScope；无法访问
-huggingface.co 时设置 `HF_ENDPOINT=https://hf-mirror.com`。
+默认测试不需要网络、模型权重或 GPU。真实 checkpoint 的 parity 测试默认忽略、
+按需运行。完整矩阵（Laya、NLI、GLiClass、Qwen 骨干、Qwen3Guard、Von、
+Decima、Kev 0.8B/4B/9B、Decision、Clef、umbrella engine、全部环境变量、
+Python 工具、CI job 与排查）见 **[docs/testing.zh-CN.md](docs/testing.zh-CN.md)**
+（[English](docs/testing.md)）。
 
-Hub 测试会启动本地回环模型中心，覆盖静态 manifest、Bearer token、Range
-断点续传、HF 分页/子目录/LFS hash，以及 ModelScope token 头与 3000 条截断拆分。
-CI 在 Linux、Windows、macOS 上运行 fmt、clippy 与测试
-（`.github/workflows/ci.yml`）。可选的 `.github/workflows/gpu.yml` 在
-self-hosted Linux `gpu` + `cuda` runner 上运行长上下文对齐与 loadgen 冒烟测试；
-需要把仓库变量 `SYS1_LAYA_TEST_ROOT` 指向已缓存的 multilingual checkpoint。
-
-Laya 官方 golden 测试默认忽略，需要本地权重与官方 golden vectors：
-
-```powershell
-$env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
-$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
-cargo test -p sys1-laya -- --ignored --nocapture
-
-# 长上下文 local-window 对齐（CUDA，本地 checkpoint）
-cargo test --release -p sys1-laya --features cuda --test long_context -- --ignored --nocapture
-
-# 长上下文扫描与官方 predict_long 输出对齐
-cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
-
-# 标量与按 bucket 的 min_confidence 与官方 gate 对齐
-cargo test -p sys1-laya --test abstention -- --ignored --nocapture
-```
+CI 在 Linux、Windows、macOS 上运行 fmt、`-D warnings` 的 clippy 与 workspace
+测试（`.github/workflows/ci.yml`），并包含 Python lint/fixture job。可选的
+`.github/workflows/gpu.yml` 在 self-hosted Linux `gpu` + `cuda` runner 上运行
+Laya 长上下文对齐与 loadgen 冒烟测试。
 
 ## 已知缺口 / Roadmap
 
@@ -797,6 +739,9 @@ cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 ## 文档
 
 - [设计](docs/design.md)
+- [测试指南](docs/testing.zh-CN.md)
+- [压测结果](docs/benchmarks.md)
+- [模型 manifest 结构](docs/model-manifest.zh-CN.md)
 - [ADR](docs/adr/)
 - [术语表](GLOSSARY.md)
 

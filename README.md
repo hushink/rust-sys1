@@ -763,82 +763,23 @@ uv run sys1-bench --exe target-cuda/release/sys1.exe `
 ## Testing
 
 ```bash
-cargo test --offline --workspace
-
-# Require the ONNX Runtime-backed tests instead of skipping when the dylib is absent
-$env:ORT_DYLIB_PATH="C:/path/to/onnxruntime.dll"
-$env:SYS1_REQUIRE_ORT="1"
-cargo test --offline -p sys1-ort
-cargo test --offline -p sys1-laya --features onnx
-
-# Candle-vs-ONNX parity: full answers on the official golden case
-$env:SYS1_LAYA_TEST_ROOT="C:/.../multilingual"
-$env:SYS1_LAYA_ONNX_DIR="D:/models/laya-onnx"
-$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
-cargo test --offline -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapture
-
-# Official routing golden (159 probes) and live hub manifests
-$env:SYS1_LAYA_ROUTING_GOLDEN="D:/path/to/laya/laya-rust/tests/golden/routing/route_probe.json"
-cargo test --offline -p sys1-laya --test routing_golden -- --nocapture
-$env:SYS1_LIVE_HUB="1"
-cargo test --offline -p sys1-hub --test live -- --nocapture
-
-# Python tools (uv workspace)
-uv sync --all-extras
-uv run --package sys1-tools --group dev ruff check python/tools
-uv run sys1-generate-scoring-stub
-
-# Candle families against upstream Python / transformers references
-$env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
-cargo test -p sys1-nli --test nli -- --ignored --nocapture
-$env:SYS1_GLICLASS_TEST_DIR="D:/models/gliclass-edge"
-cargo test -p sys1-gliclass --test gliclass -- --ignored --nocapture
-$env:SYS1_QWEN3GUARD_TEST_DIR="D:/models/qwen3guard"
-cargo test -p sys1-qwen3guard --test qwen3guard -- --ignored --nocapture
-$env:SYS1_VON_TEST_DIR="D:/models/von"
-cargo test -p sys1-von --test von -- --ignored --nocapture
-$env:SYS1_DECIMA_TEST_DIR="D:/models/decima-base"
-cargo test -p sys1-decima --test decima -- --ignored --nocapture
-$env:SYS1_KEV_TEST_DIR="D:/models/kev-0.8b"
-$env:SYS1_KEV_BASE_DIR="D:/models/qwen3.5-0.8b-base"
-cargo test -p sys1-kev --test kev -- --ignored --nocapture
-$env:SYS1_DECISION_TEST_DIR="D:/models/decision-eos-0.8b"
-cargo test -p sys1-decision --test decision -- --ignored --nocapture
-cargo test -p sys1 --test families -- --ignored --nocapture
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-The exporter produced logits within 2.5e-6 of the official golden vectors for
-all three checkpoints; the Rust parity test compares the full answer objects,
-including `action.act_probability`. The routing test matches the selected
-checkpoint, workflow, reason, and language profile on every official probe.
-Live hub tests hit real Hugging Face and ModelScope endpoints; set
-`HF_ENDPOINT=https://hf-mirror.com` when huggingface.co is unreachable.
+The default suite needs no network, model weights, or GPU. Real-checkpoint
+parity tests are ignored and opt-in. The full matrix — Laya, NLI, GLiClass,
+Qwen backbones, Qwen3Guard, Von, Decima, Kev 0.8B/4B/9B, Decision, Clef, the
+umbrella engine, every environment variable, the Python tooling, CI jobs, and
+troubleshooting — is in **[docs/testing.md](docs/testing.md)**
+([简体中文](docs/testing.zh-CN.md)).
 
-Hub tests spin up loopback model centers and cover static HTTP manifests,
-Bearer tokens, Range-resumed downloads, HF pagination/subfolders/LFS hashes,
-and ModelScope token headers plus 3000-entry truncation splitting. CI runs fmt,
-clippy, and tests on Linux, Windows, and macOS (`.github/workflows/ci.yml`). The optional
-`.github/workflows/gpu.yml` runs the long-context parity test and a loadgen
-smoke test on a self-hosted Linux `gpu` + `cuda` runner; set the repository
-variable `SYS1_LAYA_TEST_ROOT` to a cached multilingual checkpoint.
-
-Laya golden tests are ignored by default because they need local checkpoints
-and the official golden vectors:
-
-```bash
-$env:SYS1_LAYA_TEST_ROOT="C:/.../snapshots/<sha>"
-$env:SYS1_LAYA_GOLDEN_DIR="D:/path/to/laya/laya-rust/tests/golden"
-cargo test -p sys1-laya -- --ignored --nocapture
-
-# Long-context exact local-window parity (CUDA, cached checkpoint)
-cargo test --release -p sys1-laya --features cuda --test long_context -- --ignored --nocapture
-
-# Long-context scanning against the official predict_long output
-cargo test -p sys1-laya --test predict_long -- --ignored --nocapture
-
-# Scalar and per-bucket min_confidence against the official gate
-cargo test -p sys1-laya --test abstention -- --ignored --nocapture
-```
+CI runs formatting, clippy with `-D warnings`, and the workspace tests on
+Linux, Windows, and macOS (`.github/workflows/ci.yml`), plus a Python
+lint/fixture job. The optional `.github/workflows/gpu.yml` runs the Laya
+long-context parity test and a loadgen smoke test on a self-hosted Linux
+`gpu` + `cuda` runner.
 
 ## Known gaps / roadmap
 
@@ -860,6 +801,9 @@ cargo test -p sys1-laya --test abstention -- --ignored --nocapture
 ## Documentation
 
 - [Design](docs/design.md)
+- [Testing guide](docs/testing.md)
+- [Benchmarks](docs/benchmarks.en.md)
+- [Model manifest schema](docs/model-manifest.md)
 - [ADRs](docs/adr/)
 - [Glossary](GLOSSARY.md)
 
