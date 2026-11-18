@@ -10,9 +10,9 @@ The `sys1` binary: model hub, one-shot inference, and TypeSafe-compatible server
 |---|---|
 | `sys1 serve` | Run the HTTP server |
 | `sys1 pull <ref>` | Download/materialize a model (progress on stderr) |
-| `sys1 list` | List cached models |
+| `sys1 list [--tree]` | List cached models; `--tree` groups Kev adapters under their base |
 | `sys1 show <ref>` | Print a resolved manifest |
-| `sys1 rm <ref>` | Remove a cached model |
+| `sys1 rm [--with-deps] <ref>` | Remove a cached model; `--with-deps` also removes an unused Kev base |
 | `sys1 run <ref> --input request.json` | One-shot inference |
 | `sys1 doctor` | Print build/device/cache diagnostics |
 
@@ -173,6 +173,10 @@ that process or unload the model first.
 # Remove one cached model and show current usage
 sys1 rm laya-multilingual
 sys1 list
+
+# Kev adapters and their bases
+sys1 list --tree
+sys1 rm --with-deps kev-4b   # removes the base only if no other adapter uses it
 ```
 
 Adding a reference materializes it through the hub (unless cached) and makes it

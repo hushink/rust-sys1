@@ -10,9 +10,9 @@
 |---|---|
 | `sys1 serve` | 启动 HTTP 服务 |
 | `sys1 pull <ref>` | 下载/物化模型（进度输出到 stderr） |
-| `sys1 list` | 列出缓存模型 |
+| `sys1 list [--tree]` | 列出缓存模型；`--tree` 把 Kev adapter 归到其 base 下 |
 | `sys1 show <ref>` | 打印解析后的 manifest |
-| `sys1 rm <ref>` | 删除缓存模型 |
+| `sys1 rm [--with-deps] <ref>` | 删除缓存模型；`--with-deps` 同时删除无人使用的 Kev base |
 | `sys1 run <ref> --input request.json` | 单次推理 |
 | `sys1 doctor` | 打印构建/设备/缓存诊断 |
 
@@ -164,6 +164,10 @@ curl -X POST http://127.0.0.1:8080/api/config/reload
 # 删除一个缓存模型并查看当前用量
 sys1 rm laya-multilingual
 sys1 list
+
+# Kev adapter 与 base
+sys1 list --tree
+sys1 rm --with-deps kev-4b   # 仅当没有其他 adapter 使用该 base 时才删除
 ```
 
 添加引用时会通过 hub 物化模型（已缓存则直接使用），并立即对

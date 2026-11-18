@@ -297,9 +297,9 @@ laya-latest = "local:D:/models/laya"       # 本地模型目录
 
 配置文件中的相对路径按配置文件所在目录解析。`[models]` 中的名称可用于
 `serve`、`run`、`pull`、`show`、`rm`。`/api/config/reload` 只应用 `[models]`
-的增删；family 设置（包括按模型的 `families` 块）变更需要重启。对 Kev
-adapter 执行 `sys1 rm` 时会打印其
-声明的 base，并保留该 base（用单独的 `sys1 rm` 删除）。Kev 会从 `base_dir`、相邻的 `base/`
+的增删；family 设置（包括按模型的 `families` 块）变更需要重启。
+`sys1 list --tree` 会把 Kev adapter 归到其 base 下；`sys1 rm --with-deps`
+在没有其他缓存 adapter 声明该 base 时一并删除它。Kev 会从 `base_dir`、相邻的 `base/`
 目录，或 `head.pt` / `adapter_config.json` 中记录的仓库解析 Qwen3.5 base；因此
 `hf:` 适配器会在首次使用时自动拉取 base。凭据建议通过 `HF_TOKEN`、
 `MODELSCOPE_API_TOKEN`、`SYS1_HUB_TOKEN` 环境变量提供。

@@ -80,7 +80,7 @@ enum Command {
     /// Download and materialize a model.
     Pull(PullArgs),
     /// List cached models.
-    List,
+    List(ListArgs),
     /// Resolve and print a model manifest.
     Show(ShowArgs),
     /// Remove a cached model.
@@ -172,6 +172,17 @@ struct ShowArgs {
 #[derive(clap::Args)]
 struct RmArgs {
     reference: String,
+    /// Also remove a Kev adapter's Qwen3.5 base when no other cached adapter
+    /// uses it.
+    #[arg(long)]
+    with_deps: bool,
+}
+
+#[derive(clap::Args)]
+struct ListArgs {
+    /// Group Kev adapters under the base they depend on.
+    #[arg(long)]
+    tree: bool,
 }
 
 #[derive(clap::Args)]
@@ -266,16 +277,64 @@ fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Command::List => {
+        Command::List(args) => {
             let hub = make_hub(cache.as_deref(), offline, max_cache_bytes, &config)?;
-            for model in hub.list_cached()? {
-                println!(
-                    "{:<28} {:<10} {:<12} {}",
-                    model.manifest.name,
-                    model.manifest.backend,
-                    model.manifest.format,
-                    model.directory.display()
-                );
+            let models = hub.list_cached()?;
+            if args.tree {
+                let mut children: IndexMap<PathBuf, Vec<&PulledModel>> = IndexMap::new();
+                for model in &models {
+                    if let Some((_, Some(base))) = kev_base_hint(&hub, &model.directory) {
+                        children.entry(base).or_default().push(model);
+                    }
+                }
+                let mut printed = HashSet::new();
+                for (base, dependents) in &children {
+                    match models.iter().find(|model| model.directory == *base) {
+                        Some(model) => {
+                            printed.insert(model.directory.clone());
+                            println!(
+                                "{:<28} {:<10} {:<12} {}",
+                                model.manifest.name,
+                                model.manifest.backend,
+                                model.manifest.format,
+                                model.directory.display()
+                            );
+                        }
+                        None => println!("(base) {}", base.display()),
+                    }
+                    for model in dependents {
+                        if printed.insert(model.directory.clone()) {
+                            println!(
+                                "  └─ {:<25} {:<10} {:<12} {}",
+                                model.manifest.name,
+                                model.manifest.backend,
+                                model.manifest.format,
+                                model.directory.display()
+                            );
+                        }
+                    }
+                }
+                for model in &models {
+                    if printed.insert(model.directory.clone()) {
+                        println!(
+                            "{:<28} {:<10} {:<12} {}",
+                            model.manifest.name,
+                            model.manifest.backend,
+                            model.manifest.format,
+                            model.directory.display()
+                        );
+                    }
+                }
+            } else {
+                for model in &models {
+                    println!(
+                        "{:<28} {:<10} {:<12} {}",
+                        model.manifest.name,
+                        model.manifest.backend,
+                        model.manifest.format,
+                        model.directory.display()
+                    );
+                }
             }
             let usage = hub.cache_usage()?;
             println!(
@@ -313,15 +372,44 @@ fn main() -> anyhow::Result<()> {
                 println!("not cached: {}", location.display());
             }
             if let Some((base_reference, base_location)) = base {
-                match base_location {
-                    Some(path) if base_reference.starts_with("local:") => {
-                        println!("base: {} (outside the hub cache)", path.display());
+                if args.with_deps {
+                    match base_location {
+                        Some(path) if path.starts_with(&location) => {
+                            println!("base is inside the adapter directory; removed with it");
+                        }
+                        Some(path) if base_reference.starts_with("local:") => {
+                            println!(
+                                "base: {} (outside the hub cache; left in place)",
+                                path.display()
+                            );
+                        }
+                        Some(path) => {
+                            let dependents = kev_dependents(&hub, &path, &location)?;
+                            if dependents.is_empty() {
+                                match hub.remove(&base_reference) {
+                                    Ok(true) => println!("removed base {}", path.display()),
+                                    Ok(false) => println!("base not cached: {}", path.display()),
+                                    Err(error) => println!("base kept: {error:#}"),
+                                }
+                            } else {
+                                println!("base kept: still used by {}", dependents.join(", "));
+                            }
+                        }
+                        None => {
+                            println!("base declared as {base_reference} (not materialized)");
+                        }
                     }
-                    Some(path) => println!(
-                        "base kept: {} (remove with `sys1 rm {base_reference}`)",
-                        path.display()
-                    ),
-                    None => println!("base declared as {base_reference}"),
+                } else {
+                    match base_location {
+                        Some(path) if base_reference.starts_with("local:") => {
+                            println!("base: {} (outside the hub cache)", path.display());
+                        }
+                        Some(path) => println!(
+                            "base kept: {} (remove with `sys1 rm {base_reference}`)",
+                            path.display()
+                        ),
+                        None => println!("base declared as {base_reference}"),
+                    }
                 }
             }
             Ok(())
@@ -1056,6 +1144,22 @@ fn kev_base_hint(hub: &Hub, directory: &Path) -> Option<(String, Option<PathBuf>
         hub.cache_location(&reference).ok()
     };
     Some((reference, location))
+}
+
+/// Cached Kev adapters (other than `exclude`) whose base is `base`.
+fn kev_dependents(hub: &Hub, base: &Path, exclude: &Path) -> anyhow::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for model in hub.list_cached()? {
+        if model.directory == exclude {
+            continue;
+        }
+        if let Some((_, Some(location))) = kev_base_hint(hub, &model.directory)
+            && location == base
+        {
+            names.push(model.manifest.name);
+        }
+    }
+    Ok(names)
 }
 
 pub(crate) fn pull_base(hub: &Hub, reference: &str) -> Result<PathBuf, ModelError> {

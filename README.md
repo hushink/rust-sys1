@@ -319,9 +319,9 @@ laya-latest = "local:D:/models/laya"       # local model directory
 Relative paths in the file resolve from the config file's directory.
 `[models]` names are usable by `serve`, `run`, `pull`, `show`, and `rm`.
 `/api/config/reload` applies `[models]` additions/removals only; family changes,
-including per-model `families` blocks, need a restart. `sys1 rm` on a Kev adapter
-prints the declared base and leaves it
-cached (remove it with its own `sys1 rm`).
+including per-model `families` blocks, need a restart. `sys1 list --tree` groups
+Kev adapters under their base; `sys1 rm --with-deps` removes the base too when
+no other cached adapter declares it.
 Kev adapters resolve their Qwen3.5 base from `base_dir`, a `base/` sibling, or
 the repository recorded in `head.pt` / `adapter_config.json`; an `hf:` adapter
 therefore pulls the base on first use. Credentials are preferably supplied
