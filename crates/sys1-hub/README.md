@@ -42,6 +42,15 @@ URL resolution, HTTP authentication/resume behavior, and a `laya-typed-decisions
 example — is in [`docs/model-manifest.md`](../../docs/model-manifest.md)
 ([简体中文](../../docs/model-manifest.zh-CN.md)).
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-hub = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-hub = { path = "../rust-sys1/crates/sys1-hub" }
+```
+
 ## Example
 
 ```rust

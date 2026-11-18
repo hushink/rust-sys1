@@ -25,6 +25,21 @@
 
 有意不实现 `/v1/decisions`。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-server = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# 或从本地 checkout 引入：
+# sys1-server = { path = "../rust-sys1/crates/sys1-server" }
+```
+
+`router` 返回 axum `Router`，可嵌入更大的服务；`serve` 运行独立监听器。
+`sys1` 的 `InferenceEngine` 实现了 `ModelResolver`，可作为运行时
+`/api/models` 端点的后端。
+
 ## 示例
 
 ```rust

@@ -6,6 +6,34 @@
 ModernBERT-large 编码器加 option-marker scorer：每个选项在序列中占一个
 `[MASK]`，从该位置的隐藏状态得到分数。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-von = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-von = { path = "../rust-sys1/crates/sys1-von" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::{DecisionModel, Questions};
+use sys1_protocol::State;
+use sys1_von::{VonModel, VonOptions};
+
+let model = VonModel::load_dir(Path::new("/models/von"), VonOptions::default())?;
+let output = model.predict(
+    &State::text("I was charged twice and want a refund."),
+    &Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("tech", "Bugs")])
+        .noul("refund", "The customer asks for a refund."),
+)?;
+let team = output.answers.choice("team")?;
+let refund = output.answers.noul("refund")?;
+```
+
 ## 布局
 
 ```text

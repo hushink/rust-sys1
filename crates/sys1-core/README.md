@@ -22,6 +22,20 @@ selection for rust-sys1.
 - `ModelManifest` / `ModelFile`: the model bundle contract.
 - `DevicePreference` / `ResolvedDevice`: runtime device selection helpers.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-core = { path = "../rust-sys1/crates/sys1-core" }
+# sys1-protocol = { path = "../rust-sys1/crates/sys1-protocol" }
+```
+
+`sys1-core` is the trait/registry layer; implement `DecisionModel` to plug your
+own backend in, or use it with a family crate such as `sys1-nli`.
+
 ## Example
 
 ```rust

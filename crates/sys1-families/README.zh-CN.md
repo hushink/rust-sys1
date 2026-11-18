@@ -19,6 +19,20 @@
 CLI 与 `sys1` umbrella engine 用它注册本地目录或已拉取的 Hugging Face snapshot，
 调用方不需要提前知道目录属于哪个模型族。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-families = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-hub = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-families = { path = "../rust-sys1/crates/sys1-families" }
+```
+
+大多数应用应使用 `sys1` 的 `InferenceEngine`，而不是直接调用分发器；本 crate
+面向自定义注册表或工具。
+
 ## 用法
 
 ```rust

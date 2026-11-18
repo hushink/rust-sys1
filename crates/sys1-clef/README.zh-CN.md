@@ -5,6 +5,33 @@
 基于 candle 的 Clef（`clef-joint-v1`）。Qwen3.5 骨干读取 state 与 schema，
 Clef 的 joint schema head 将状态证据路由到每个问题，并在一次前向中联合打分所有选项。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-clef = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-clef = { path = "../rust-sys1/crates/sys1-clef" }
+```
+
+```rust
+use std::path::Path;
+use sys1_clef::{ClefModel, ClefOptions};
+use sys1_core::{DecisionModel, Questions};
+use sys1_protocol::State;
+
+let model = ClefModel::load_dir(Path::new("/models/clef-flash"), ClefOptions::default())?;
+let output = model.predict(
+    &State::text("I was charged twice and want a refund."),
+    &Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("tech", "Bugs")])
+        .noul("refund", "The customer asks for a refund."),
+)?;
+let team = output.answers.choice("team")?;
+```
+
 ## 序列
 
 ```text

@@ -6,6 +6,33 @@ Clef (`clef-joint-v1`) implemented with candle. A Qwen3.5 backbone reads the
 state and schema, and Clef's joint schema head routes evidence to every question
 and scores every option together in one forward pass.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-clef = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-clef = { path = "../rust-sys1/crates/sys1-clef" }
+```
+
+```rust
+use std::path::Path;
+use sys1_clef::{ClefModel, ClefOptions};
+use sys1_core::{DecisionModel, Questions};
+use sys1_protocol::State;
+
+let model = ClefModel::load_dir(Path::new("/models/clef-flash"), ClefOptions::default())?;
+let output = model.predict(
+    &State::text("I was charged twice and want a refund."),
+    &Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("tech", "Bugs")])
+        .noul("refund", "The customer asks for a refund."),
+)?;
+let team = output.answers.choice("team")?;
+```
+
 ## Sequence
 
 ```text

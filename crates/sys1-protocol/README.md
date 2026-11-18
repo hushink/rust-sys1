@@ -17,6 +17,18 @@ SDK, server, hub, and tests.
 - `ValidationError`, `ValidationReport`, `ErrorResponse`
 - `ModelMetadataList` for `/v1/models`
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-protocol = { path = "../rust-sys1/crates/sys1-protocol" }
+```
+
+Use this crate alone for request/response parsing and validation without any
+inference dependency.
+
 ## Example
 
 ```rust

@@ -7,9 +7,18 @@ rust-sys1 进程内 API 的 umbrella crate。
 按 feature 重新导出核心 trait、协议类型与 hub，并提供把全部核心组件串起来的
 `InferenceEngine`。
 
+## 作为库使用
+
 ```toml
-sys1 = { path = "../sys1" }
+[dependencies]
+sys1 = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入（按你的工作区调整路径）：
+# sys1 = { path = "../rust-sys1/crates/sys1" }
 ```
+
+这是在另一个 Rust 程序中嵌入 rust-sys1 的推荐方式：一个 crate 即可获得协议
+类型、hub、全部 candle family 与 `InferenceEngine`。工作区目前尚未发布到
+crates.io。
 
 默认 feature：`laya`、`hub`、`families`。`families` 增加 Laya、NLI、GLiClass、
 Qwen3Guard、Von、Decima、Kev、Decision 与 Clef 的统一分发。可选后端/加速 feature：`onnx`、`cuda`、`cudnn`、`metal`、`accelerate`，

@@ -125,6 +125,22 @@ multilingual graph; 1.32 loaded and ran it reliably. Set `ORT_DYLIB_PATH` to the
 newer library. The synthetic graph tests still cover batching, padding, marker
 indexing, and factory wiring.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-laya = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-laya = { path = "../rust-sys1/crates/sys1-laya" }
+```
+
+Add `features = ["onnx"]` for the ONNX Runtime backend, or `cuda` / `cudnn` /
+`metal` / `accelerate` for the matching candle backend. `sys1` also re-exports
+`LayaModel`, `LayaOptions`, and `LayaOnnxModel` if you prefer the umbrella
+crate.
+
 ## Example
 
 ```rust

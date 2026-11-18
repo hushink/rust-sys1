@@ -7,9 +7,18 @@ Umbrella crate for the rust-sys1 in-process API.
 It re-exports the core traits, protocol types, and hub behind feature flags,
 and provides `InferenceEngine`, which wires all core components together.
 
+## Use as a library
+
 ```toml
-sys1 = { path = "../sys1" }
+[dependencies]
+sys1 = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout (adjust the path to your workspace):
+# sys1 = { path = "../rust-sys1/crates/sys1" }
 ```
+
+This is the recommended dependency for embedding rust-sys1 in another Rust
+program: one crate gives you the protocol types, hub, every candle family, and
+`InferenceEngine`. The workspace is not yet published to crates.io.
 
 Default features: `laya`, `hub`, `families`. `families` adds the shared
 dispatcher for Laya, NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision and

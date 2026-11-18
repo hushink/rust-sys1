@@ -21,6 +21,20 @@ rust-sys1 的核心 trait、manifest、模型注册表、typed 进程内 API 与
 - `ModelManifest` / `ModelFile`：模型包契约。
 - `DevicePreference` / `ResolvedDevice`：运行时设备选择辅助类型。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-core = { path = "../rust-sys1/crates/sys1-core" }
+# sys1-protocol = { path = "../rust-sys1/crates/sys1-protocol" }
+```
+
+`sys1-core` 是 trait/注册表层：实现 `DecisionModel` 即可接入自己的后端，也可与
+`sys1-nli` 等 family crate 配合使用。
+
 ## 示例
 
 ```rust

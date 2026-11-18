@@ -5,6 +5,35 @@
 基于 candle 的 Kev（`kev-pointer-v1`）。Kev 由 Qwen3.5 base、可选的 PEFT LoRA
 adapter 和两投影 pointer head 组成。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-kev = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-kev = { path = "../rust-sys1/crates/sys1-kev" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::{DecisionModel, Questions};
+use sys1_kev::{KevModel, KevOptions};
+use sys1_protocol::State;
+
+// base 必须与 adapter 相邻或位于 base/；否则设置
+// KevOptions { base_directory: Some(path), .. }，或交给 engine 自动拉取。
+let model = KevModel::load_dir(Path::new("/models/kev-0.8b"), KevOptions::default())?;
+let output = model.predict(
+    &State::text("I was charged twice and want a refund."),
+    &Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("tech", "Bugs")])
+        .noul("refund", "The customer asks for a refund."),
+)?;
+let team = output.answers.choice("team")?;
+```
+
 ## 目录布局
 
 Kev 仓库只提供 adapter、head 和 tokenizer。把 Qwen3.5 base 放在同目录、

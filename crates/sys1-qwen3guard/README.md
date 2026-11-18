@@ -16,6 +16,34 @@ so it answers only its own preset questions:
 Use `Qwen3GuardModel::preset_questions()` to obtain the exact question
 definitions. Any other question is rejected.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-qwen3guard = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-qwen3guard = { path = "../rust-sys1/crates/sys1-qwen3guard" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::DecisionModel;
+use sys1_protocol::State;
+use sys1_qwen3guard::{Qwen3GuardModel, Qwen3GuardOptions};
+
+let model = Qwen3GuardModel::load_dir(
+    Path::new("/models/Qwen3Guard-Gen-0.6B"),
+    Qwen3GuardOptions::default(),
+)?;
+let output = model.predict(
+    &State::text("How do I bake sourdough bread?"),
+    &Qwen3GuardModel::preset_questions(),
+)?;
+let safety = output.answers.choice("safety")?;
+```
+
 ## Rows
 
 ```text

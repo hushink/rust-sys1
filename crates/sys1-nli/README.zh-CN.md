@@ -26,6 +26,17 @@ content-to-position 与 position-to-content 三部分分数，共享一张按 La
 均为英文、宽松许可证，训练时使用 512 token 的 premise/hypothesis 对。
 目录需要 `config.json`、`model.safetensors` 与 `tokenizer.json`。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-nli = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-nli = { path = "../rust-sys1/crates/sys1-nli" }
+```
+
 ## 用法
 
 ```rust

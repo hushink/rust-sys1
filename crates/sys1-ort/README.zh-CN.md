@@ -5,6 +5,19 @@
 rust-sys1 的 ONNX Runtime 执行层。它负责 session 生命周期与 System One
 token-scoring 契约；模型 family 保留 tokenization、序列布局、校准与答案格式化。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-ort = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-ort = { path = "../rust-sys1/crates/sys1-ort" }
+```
+
+执行提供器通过 feature 启用：`cuda`、`tensorrt`、`directml`、`coreml`。
+ONNX Runtime 本身在创建 session 时通过 `ORT_DYLIB_PATH` 或平台加载路径查找，
+构建过程不会下载运行时。
+
 ## 用法
 
 ```rust

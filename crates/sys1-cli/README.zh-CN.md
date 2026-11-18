@@ -4,6 +4,25 @@
 
 `sys1` 二进制：模型 hub、单次推理与 TypeSafe-compatible 服务。
 
+## 安装
+
+`sys1-cli` 提供 `sys1` 二进制。从本地 checkout 安装：
+
+```bash
+cargo install --path crates/sys1-cli
+# CUDA 构建：
+cargo install --path crates/sys1-cli --features cuda
+```
+
+也可以不安装直接运行：
+
+```bash
+cargo run --release -p sys1-cli -- serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+```
+
+本 crate 没有 library target。若要在其他 Rust 程序中嵌入 rust-sys1，请依赖
+`sys1`（进程内 engine）或 `sys1-server`（HTTP router）。
+
 ## 命令
 
 | 命令 | 作用 |

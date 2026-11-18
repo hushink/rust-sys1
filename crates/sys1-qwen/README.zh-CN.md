@@ -14,6 +14,19 @@ rust-sys1 多个模型族共用的 Candle Qwen3 / Qwen3.5 解码器骨干。只�
   3–4 tap 的 depthwise 卷积用移位乘加实现；candle 通用 `conv1d` 在这种形状下
   的 CUDA 性能约慢两个数量级。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-qwen = { git = "https://github.com/hushink/rust-sys1" }
+candle-core = "0.11"
+# 或从本地 checkout 引入：
+# sys1-qwen = { path = "../rust-sys1/crates/sys1-qwen" }
+```
+
+本 crate 是骨干组件，不是 `DecisionModel`；`sys1-kev`、`sys1-decision`、
+`sys1-clef`、`sys1-qwen3guard` 等 family 在其上叠加各自的头部。
+
 ```rust
 use candle_core::{DType, Device};
 use sys1_qwen::{Qwen3, Qwen3Config, WeightStore};

@@ -18,6 +18,17 @@ Ettin/ModernBERT 编码器，`model.safetensors` 约 131 MB，是 GLiClass 家�
 
 目录需要 `config.json`、`model.safetensors` 与 `tokenizer.json`。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-gliclass = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-gliclass = { path = "../rust-sys1/crates/sys1-gliclass" }
+```
+
 ## 用法
 
 ```rust

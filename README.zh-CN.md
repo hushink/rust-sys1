@@ -57,6 +57,99 @@ Python 工作区位于 [`python/tools`](python/tools/README.zh-CN.md)，由 uv �
 ONNX 导出/校验、ORT fixture 生成与 HTTP 压测。每个 crate 都提供英文
 `README.md` 与中文 `README.zh-CN.md`；Python 包同样提供双语 README。
 
+## 作为库使用
+
+工作区尚未发布到 crates.io。可以通过 Git 或本地 checkout 引入：
+
+```toml
+[dependencies]
+sys1 = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1 = { path = "../rust-sys1/crates/sys1" }
+```
+
+推荐从 `sys1` 开始：它重新导出协议、核心 trait、hub 与各 family 类型，并提供
+`InferenceEngine`，统一处理下载、checkpoint 识别、懒加载、批处理和类型化答案：
+
+```rust
+use sys1::{EngineOptions, InferenceEngine, Questions, State};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let engine = InferenceEngine::new(EngineOptions::default())?;
+    engine.add_as("nli", "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0")?;
+
+    let state = State::text("I was charged twice and need a refund today.");
+    let questions = Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("technical", "Bugs")])
+        .noul("refund", "Is the customer asking for a refund?");
+
+    let output = engine.predict("nli", &state, &questions)?;
+    let team = output.answers.choice("team")?;
+    let refund = output.answers.noul("refund")?;
+    println!("{} {:.3}", team.choice, refund.noul);
+    Ok(())
+}
+```
+
+已有本地 checkpoint 时，用
+`InferenceEngine::from_directory(path, EngineOptions::default())?` 注册，并用
+目录名作为 model id。`add_as` 接受前文的 `local:`、`hf:`、`modelscope:` 与 HTTP
+manifest 引用；Kev adapter 会自动拉取其声明的 Qwen3.5 base。
+
+### 直接使用单个 family
+
+只引入 family crate 与共享的 trait/wire 类型：
+
+```toml
+[dependencies]
+sys1-nli = { path = "../rust-sys1/crates/sys1-nli" }
+sys1-core = { path = "../rust-sys1/crates/sys1-core" }
+sys1-protocol = { path = "../rust-sys1/crates/sys1-protocol" }
+# 也可以用 Git：
+# sys1-nli = { git = "https://github.com/hushink/rust-sys1" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::{DecisionModel, Questions};
+use sys1_nli::{NliModel, NliOptions};
+use sys1_protocol::State;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let model = NliModel::load_dir(Path::new("/models/nli"), NliOptions::default())?;
+    let output = model.predict(
+        &State::text("I was charged twice."),
+        &Questions::new().noul("refund", "Is a refund requested?"),
+    )?;
+    println!("{:.3}", output.answers.noul("refund")?.noul);
+    Ok(())
+}
+```
+
+每个 crate 的 README 都说明如何引入它并给出最小示例；`sys1-cli` 则说明如何
+安装二进制。按目标选择 crate：
+
+| 目标 | Crate |
+|---|---|
+| 任意 family 的进程内 engine | `sys1` |
+| 官方 wire types 与校验 | `sys1-protocol` |
+| trait、注册表、类型化 questions/answers | `sys1-core` |
+| 下载、manifest 与缓存 | `sys1-hub` |
+| 单个模型 family | `sys1-laya`、`sys1-nli`、`sys1-gliclass`、`sys1-qwen3guard`、`sys1-von`、`sys1-decima`、`sys1-kev`、`sys1-decision`、`sys1-clef` |
+| HTTP router 或独立服务 | `sys1-server` |
+| CLI 二进制 | `sys1-cli`（`cargo install --path crates/sys1-cli`） |
+
+### Features
+
+`sys1` 默认启用 `laya`、`hub`、`families`。按需增加 `onnx`、`cuda`、`cudnn`、
+`metal`、`accelerate` 或 ONNX Runtime 执行提供器：
+
+```toml
+sys1 = { git = "https://github.com/hushink/rust-sys1", features = ["cuda"] }
+```
+
+工作区要求 Rust 1.92（edition 2024），许可证为 Apache-2.0。
+
 ## 快速开始
 
 ### 构建

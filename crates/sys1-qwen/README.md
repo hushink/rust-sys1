@@ -18,6 +18,20 @@ families read option positions and apply their own heads.
   multiplies; candle's generic `conv1d` is roughly two orders of magnitude
   slower on CUDA for this shape.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-qwen = { git = "https://github.com/hushink/rust-sys1" }
+candle-core = "0.11"
+# Or from a checkout:
+# sys1-qwen = { path = "../rust-sys1/crates/sys1-qwen" }
+```
+
+This is a backbone building block, not a `DecisionModel`; family crates
+(`sys1-kev`, `sys1-decision`, `sys1-clef`, `sys1-qwen3guard`) layer their heads
+on top of it.
+
 ```rust
 use candle_core::{DType, Device};
 use sys1_qwen::{Qwen3, Qwen3Config, WeightStore};

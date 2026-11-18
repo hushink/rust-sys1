@@ -19,6 +19,20 @@ ModernBERT 编码器；本身不是决策模型。
 编码器接收 `path_prefix`，同一份实现可读取 `model.*`（Laya/NLI）与
 `model.encoder_model.*`（GLiClass）checkpoint。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-modernbert = { git = "https://github.com/hushink/rust-sys1" }
+candle-core = "0.11"
+candle-nn = "0.11"
+# 或从本地 checkout 引入：
+# sys1-modernbert = { path = "../rust-sys1/crates/sys1-modernbert" }
+```
+
+本 crate 是编码器组件，不是 `DecisionModel`；大多数用户应依赖 family crate 或
+`sys1`。
+
 ## 用法
 
 ```rust

@@ -59,6 +59,103 @@ managed by uv: ONNX export/check, the ORT fixture generator, and the HTTP
 benchmark. Each crate has an English `README.md` and a Chinese
 `README.zh-CN.md`; the Python package does too.
 
+## Use as a library
+
+The workspace is not published to crates.io yet. Depend on it through Git or a
+local checkout:
+
+```toml
+[dependencies]
+sys1 = { git = "https://github.com/hushink/rust-sys1" }
+# Or, from a checkout:
+# sys1 = { path = "../rust-sys1/crates/sys1" }
+```
+
+`sys1` is the recommended entry point. It re-exports the protocol, core, hub, and
+family types and provides `InferenceEngine`, which handles downloads, checkpoint
+detection, lazy loading, batching, and typed answers:
+
+```rust
+use sys1::{EngineOptions, InferenceEngine, Questions, State};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let engine = InferenceEngine::new(EngineOptions::default())?;
+    engine.add_as("nli", "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0")?;
+
+    let state = State::text("I was charged twice and need a refund today.");
+    let questions = Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("technical", "Bugs")])
+        .noul("refund", "Is the customer asking for a refund?");
+
+    let output = engine.predict("nli", &state, &questions)?;
+    let team = output.answers.choice("team")?;
+    let refund = output.answers.noul("refund")?;
+    println!("{} {:.3}", team.choice, refund.noul);
+    Ok(())
+}
+```
+
+For an existing local checkpoint, register it with
+`InferenceEngine::from_directory(path, EngineOptions::default())?` and use the
+directory name as the model id. `add_as` accepts every `local:`, `hf:`,
+`modelscope:`, and HTTP-manifest reference described above; Kev adapters pull
+their declared Qwen3.5 base automatically.
+
+### Use one family directly
+
+Add the family crate plus the shared traits and wire types:
+
+```toml
+[dependencies]
+sys1-nli = { path = "../rust-sys1/crates/sys1-nli" }
+sys1-core = { path = "../rust-sys1/crates/sys1-core" }
+sys1-protocol = { path = "../rust-sys1/crates/sys1-protocol" }
+# Or with Git:
+# sys1-nli = { git = "https://github.com/hushink/rust-sys1" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::{DecisionModel, Questions};
+use sys1_nli::{NliModel, NliOptions};
+use sys1_protocol::State;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let model = NliModel::load_dir(Path::new("/models/nli"), NliOptions::default())?;
+    let output = model.predict(
+        &State::text("I was charged twice."),
+        &Questions::new().noul("refund", "Is a refund requested?"),
+    )?;
+    println!("{:.3}", output.answers.noul("refund")?.noul);
+    Ok(())
+}
+```
+
+Each crate README shows how to depend on it (and a minimal example);
+`sys1-cli` documents installing the binary instead. The
+[Workspace](#workspace) table maps each goal to a crate; in short:
+
+| Goal | Crate |
+|---|---|
+| In-process engine over any family | `sys1` |
+| Official wire types and validation | `sys1-protocol` |
+| Traits, registry, typed questions/answers | `sys1-core` |
+| Download, manifest, and cache | `sys1-hub` |
+| One model family | `sys1-laya`, `sys1-nli`, `sys1-gliclass`, `sys1-qwen3guard`, `sys1-von`, `sys1-decima`, `sys1-kev`, `sys1-decision`, `sys1-clef` |
+| HTTP router or standalone server | `sys1-server` |
+| CLI binary | `sys1-cli` (`cargo install --path crates/sys1-cli`) |
+
+### Features
+
+`sys1` enables `laya`, `hub`, and `families` by default. Add `onnx`, `cuda`,
+`cudnn`, `metal`, `accelerate`, or the ONNX Runtime providers as needed:
+
+```toml
+sys1 = { git = "https://github.com/hushink/rust-sys1", features = ["cuda"] }
+```
+
+The workspace requires Rust 1.92 (edition 2024) and is Apache-2.0 licensed.
+
 ## Quick start
 
 ### Build

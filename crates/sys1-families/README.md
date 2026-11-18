@@ -19,6 +19,20 @@ One `ModelFactory` for the compiled rust-sys1 families:
 The CLI and the `sys1` umbrella engine use it to register a local directory or
 a pulled Hugging Face snapshot without knowing which family it contains.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-families = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-hub = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-families = { path = "../rust-sys1/crates/sys1-families" }
+```
+
+Most applications should use `sys1`'s `InferenceEngine` instead of calling the
+dispatcher directly; this crate is for custom registries or tooling.
+
 ## Usage
 
 ```rust

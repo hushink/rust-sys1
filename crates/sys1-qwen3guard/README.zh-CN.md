@@ -14,6 +14,34 @@
 
 用 `Qwen3GuardModel::preset_questions()` 获取完整问题定义；其他问题会报错。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-qwen3guard = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-qwen3guard = { path = "../rust-sys1/crates/sys1-qwen3guard" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::DecisionModel;
+use sys1_protocol::State;
+use sys1_qwen3guard::{Qwen3GuardModel, Qwen3GuardOptions};
+
+let model = Qwen3GuardModel::load_dir(
+    Path::new("/models/Qwen3Guard-Gen-0.6B"),
+    Qwen3GuardOptions::default(),
+)?;
+let output = model.predict(
+    &State::text("How do I bake sourdough bread?"),
+    &Qwen3GuardModel::preset_questions(),
+)?;
+let safety = output.answers.choice("safety")?;
+```
+
 ## 行
 
 ```text

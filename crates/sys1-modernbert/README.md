@@ -19,6 +19,20 @@ Shared candle ModernBERT encoder used by rust-sys1 model families (`sys1-laya`,
 The encoder takes a `path_prefix` so one implementation can read both
 `model.*` (Laya/NLI) and `model.encoder_model.*` (GLiClass) checkpoints.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-modernbert = { git = "https://github.com/hushink/rust-sys1" }
+candle-core = "0.11"
+candle-nn = "0.11"
+# Or from a checkout:
+# sys1-modernbert = { path = "../rust-sys1/crates/sys1-modernbert" }
+```
+
+This crate is an encoder building block, not a `DecisionModel`; most users
+should depend on a family crate or on `sys1`.
+
 ## Usage
 
 ```rust

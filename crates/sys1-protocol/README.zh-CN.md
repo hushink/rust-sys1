@@ -16,6 +16,17 @@ HTTP 或推理栈，被 SDK、server、hub 与测试共用。
 - `ValidationError`、`ValidationReport`、`ErrorResponse`
 - `/v1/models` 的 `ModelMetadataList`
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-protocol = { path = "../rust-sys1/crates/sys1-protocol" }
+```
+
+只需要请求/响应解析与校验、不引入推理依赖时，可以单独使用本 crate。
+
 ## 示例
 
 ```rust

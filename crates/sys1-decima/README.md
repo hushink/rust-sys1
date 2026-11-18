@@ -11,6 +11,34 @@ architecture is selected from `encoder/config.json` (`model_type = "bert"`
 versus ModernBERT); BERT uses `[CLS]`/`[SEP]` ids 0 and 2 unless the config
 overrides them.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-decima = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-decima = { path = "../rust-sys1/crates/sys1-decima" }
+```
+
+```rust
+use std::path::Path;
+use sys1_core::{DecisionModel, Questions};
+use sys1_decima::{DecimaModel, DecimaOptions};
+use sys1_protocol::State;
+
+let model = DecimaModel::load_dir(Path::new("/models/decima-base"), DecimaOptions::default())?;
+let output = model.predict(
+    &State::text("I was charged twice and want a refund."),
+    &Questions::new()
+        .choice("team", [("billing", "Charges and refunds"), ("tech", "Bugs")])
+        .score("urgency", ["low", "medium", "high"]),
+)?;
+let team = output.answers.choice("team")?;
+let urgency = output.answers.score("urgency")?;
+```
+
 ## Rows
 
 ```text

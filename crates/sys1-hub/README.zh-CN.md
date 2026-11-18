@@ -42,6 +42,15 @@ rust-sys1 的模型源、manifest 解析与磁盘缓存。
 [`docs/model-manifest.zh-CN.md`](../../docs/model-manifest.zh-CN.md)
 （[English](../../docs/model-manifest.md)）。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-hub = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-hub = { path = "../rust-sys1/crates/sys1-hub" }
+```
+
 ## 示例
 
 ```rust

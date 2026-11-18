@@ -28,6 +28,17 @@ All are English, permissively licensed, and trained for 512-token
 premise/hypothesis pairs. The directory needs `config.json`,
 `model.safetensors`, and `tokenizer.json`.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-nli = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-nli = { path = "../rust-sys1/crates/sys1-nli" }
+```
+
 ## Usage
 
 ```rust

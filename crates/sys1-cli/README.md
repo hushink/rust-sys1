@@ -4,6 +4,25 @@
 
 The `sys1` binary: model hub, one-shot inference, and TypeSafe-compatible server.
 
+## Install
+
+`sys1-cli` provides the `sys1` binary. Install it from a checkout:
+
+```bash
+cargo install --path crates/sys1-cli
+# CUDA build:
+cargo install --path crates/sys1-cli --features cuda
+```
+
+Or run it without installing:
+
+```bash
+cargo run --release -p sys1-cli -- serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+```
+
+This crate has no library target. To embed rust-sys1 in another Rust program,
+depend on `sys1` (in-process engine) or `sys1-server` (HTTP router) instead.
+
 ## Commands
 
 | Command | Purpose |

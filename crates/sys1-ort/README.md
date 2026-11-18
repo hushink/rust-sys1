@@ -6,6 +6,19 @@ ONNX Runtime execution layer for rust-sys1. It owns session lifecycle and the
 System One token-scoring contract; model families keep tokenization, sequence
 layout, calibration, and answer formatting.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-ort = { git = "https://github.com/hushink/rust-sys1" }
+# Or from a checkout:
+# sys1-ort = { path = "../rust-sys1/crates/sys1-ort" }
+```
+
+Execution providers are features: `cuda`, `tensorrt`, `directml`, `coreml`.
+ONNX Runtime itself is loaded at session creation through `ORT_DYLIB_PATH` or
+the platform loader path; builds never download it.
+
 ## Usage
 
 ```rust

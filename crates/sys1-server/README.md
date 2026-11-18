@@ -25,6 +25,21 @@ Strict TypeSafe-compatible System One HTTP server built on axum.
 
 There is intentionally no `/v1/decisions`.
 
+## Use as a library
+
+```toml
+[dependencies]
+sys1-server = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Or from a checkout:
+# sys1-server = { path = "../rust-sys1/crates/sys1-server" }
+```
+
+`router` returns an axum `Router` for embedding in a larger service;
+`serve` runs the standalone listener. The `sys1` crate's `InferenceEngine`
+implements `ModelResolver`, so it can back the runtime `/api/models` endpoints.
+
 ## Example
 
 ```rust

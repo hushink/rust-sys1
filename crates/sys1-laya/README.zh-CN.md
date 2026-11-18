@@ -117,6 +117,21 @@ cargo test -p sys1-laya --features onnx --test onnx_parity -- --ignored --nocapt
 将 `ORT_DYLIB_PATH` 指向较新的库即可。合成计算图测试仍覆盖 batching、padding、
 marker 索引与 factory 接线。
 
+## 作为库使用
+
+```toml
+[dependencies]
+sys1-laya = { git = "https://github.com/hushink/rust-sys1" }
+sys1-core = { git = "https://github.com/hushink/rust-sys1" }
+sys1-protocol = { git = "https://github.com/hushink/rust-sys1" }
+# 或从本地 checkout 引入：
+# sys1-laya = { path = "../rust-sys1/crates/sys1-laya" }
+```
+
+ONNX Runtime 后端加 `features = ["onnx"]`；candle 加速用 `cuda` / `cudnn` /
+`metal` / `accelerate`。也可以直接依赖 umbrella crate `sys1`，它重新导出了
+`LayaModel`、`LayaOptions` 与 `LayaOnnxModel`。
+
 ## 示例
 
 ```rust
