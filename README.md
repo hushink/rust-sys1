@@ -30,6 +30,44 @@ plus NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision 1.0 and Clef.
 - Observability: Prometheus/JSON metrics, replaceable telemetry, W3C `traceparent`, text/JSON/file logs.
 - Accelerator feature skeleton: CPU / CUDA / cuDNN / Metal / Accelerate.
 
+## Supported models and family tags
+
+Every checkpoint is detected from its directory layout. The **family tag** in
+the first column is the value of `ModelManifest.family` (and `model.json` for a
+[custom HTTP center](docs/model-manifest.md)); it selects the implementation in
+`sys1-families`. The model id on the left of `--model NAME=REF` (or a
+`[models]` key) is independent of the tag — for example
+`sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0` uses the
+tag `nli` and the id `nli`.
+
+| Family tag | Model | Notes | Reference |
+|---|---|---|---|
+| `laya` | Laya `english`, `multilingual`, `typed-decisions` | ModernBERT-large 421M / mmBERT-base 322M; a repository root registers all three variants and the lazy `laya-latest` router; optional ONNX backend | `hf:convaiinnovations/laya` |
+| `nli` | `ModernBERT-base-zeroshot-v2.0` | 150M, ~299 MB safetensors | `hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0` |
+| `nli` | `ModernBERT-large-zeroshot-v2.0` | 395M, ~792 MB | `hf:MoritzLaurer/ModernBERT-large-zeroshot-v2.0` |
+| `nli` | `deberta-v3-large-zeroshot-v2.0` | 435M, ~870 MB F16; disentangled attention | `hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0` |
+| `gliclass` | `gliclass-instruct-edge-v1.0` | 32.7M Ettin/ModernBERT, ~131 MB, Apache-2.0 | `hf:knowledgator/gliclass-instruct-edge-v1.0` |
+| `qwen3guard` | `Qwen3Guard-Gen-0.6B` | Dense Qwen3 0.6B; fixed `safety` / `unsafe` / `unsafe_strict` / `category` presets | `hf:Qwen/Qwen3Guard-Gen-0.6B` |
+| `von` | Von 1.1 | ModernBERT-large + `option_marker.pt` | `hf:wfzyx/von` |
+| `decima` | `decima-small` | multilingual-e5-small BERT encoder, v1 layout | `hf:amyrmahdy/decima-small` |
+| `decima` | `decima-base`, `decima-base-clean` | mmBERT-base, v2 layout | `hf:amyrmahdy/decima-base`, `hf:amyrmahdy/decima-base-clean` |
+| `decima` | `decima-agent` | mmBERT-base, 8192-token state, `choice_fit` | `hf:amyrmahdy/decima-agent` |
+| `decima` | `decima-guard`, `decima-guard-small` | mmBERT-base / mmBERT-small guard checks, `choice_fit` | `hf:amyrmahdy/decima-guard`, `hf:amyrmahdy/decima-guard-small` |
+| `kev` | `kev-0.8b`, `kev-4b`, `kev-9b` | Qwen3.5 base + PEFT LoRA + pointer head; the declared base is pulled automatically | `hf:jaredpalmer/kev-0.8b`, `hf:jaredpalmer/kev-4b`, `hf:jaredpalmer/kev-9b` |
+| `decision` | `Decision-1.0-Eos-0.8B` | Qwen3.5 0.8B backbone + endpoint head | `hf:vllm-sr/Decision-1.0-Eos-0.8B` |
+| `clef` | `clef-flash` | Qwen3.5 9B joint-schema head, ~18.8 GB BF16 | `hf:Cloudflare/clef-flash` |
+
+All candle families support `choice`, `score`, and `noul` questions unless the
+family README says otherwise (Qwen3Guard accepts only its presets; box questions
+are unsupported). The `sys1.toml.example` and each crate README show the exact
+checkpoint layout and the upstream parity tests that exercise these models.
+
+Validation status: Laya's official golden logits, NLI (ModernBERT and
+DeBERTa-v3), GLiClass, Qwen3Guard 0.6B, Von, Decision, Decima base/small/
+guard-small, Kev 0.8B/4B/9B, and Clef flash have parity tests against the
+upstream implementations or recorded decisions. The other checkpoints in the
+table share the same architecture and layout but are not individually exercised.
+
 ## Workspace
 
 | Crate | Role |

@@ -29,6 +29,42 @@
 - 可观测性：Prometheus/JSON 指标、可替换 telemetry、W3C `traceparent`、text/JSON/文件日志。
 - 加速器 feature 骨架：CPU / CUDA / cuDNN / Metal / Accelerate。
 
+## 支持的模型与家族 tag
+
+所有 checkpoint 都根据目录结构自动识别。第一列的**家族 tag** 就是
+`ModelManifest.family`（以及[自定义 HTTP 中心](docs/model-manifest.zh-CN.md)
+`model.json` 中的 `family`）的取值，`sys1-families` 用它选择具体实现。
+`--model NAME=REF`（或 `[models]` 键）中 `NAME` 的模型 id 与 tag 相互独立：
+例如 `sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0`
+使用 tag `nli`、model id 为 `nli`。
+
+| 家族 tag | 模型 | 说明 | 引用 |
+|---|---|---|---|
+| `laya` | Laya `english`、`multilingual`、`typed-decisions` | ModernBERT-large 421M / mmBERT-base 322M；仓库根目录会注册三个 variant 与懒加载的 `laya-latest` router；可选 ONNX 后端 | `hf:convaiinnovations/laya` |
+| `nli` | `ModernBERT-base-zeroshot-v2.0` | 150M，约 299 MB safetensors | `hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0` |
+| `nli` | `ModernBERT-large-zeroshot-v2.0` | 395M，约 792 MB | `hf:MoritzLaurer/ModernBERT-large-zeroshot-v2.0` |
+| `nli` | `deberta-v3-large-zeroshot-v2.0` | 435M，约 870 MB F16；disentangled attention | `hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0` |
+| `gliclass` | `gliclass-instruct-edge-v1.0` | 32.7M Ettin/ModernBERT，约 131 MB，Apache-2.0 | `hf:knowledgator/gliclass-instruct-edge-v1.0` |
+| `qwen3guard` | `Qwen3Guard-Gen-0.6B` | dense Qwen3 0.6B；固定的 `safety` / `unsafe` / `unsafe_strict` / `category` 预设 | `hf:Qwen/Qwen3Guard-Gen-0.6B` |
+| `von` | Von 1.1 | ModernBERT-large + `option_marker.pt` | `hf:wfzyx/von` |
+| `decima` | `decima-small` | multilingual-e5-small BERT，v1 布局 | `hf:amyrmahdy/decima-small` |
+| `decima` | `decima-base`、`decima-base-clean` | mmBERT-base，v2 布局 | `hf:amyrmahdy/decima-base`、`hf:amyrmahdy/decima-base-clean` |
+| `decima` | `decima-agent` | mmBERT-base，8192 token state，`choice_fit` | `hf:amyrmahdy/decima-agent` |
+| `decima` | `decima-guard`、`decima-guard-small` | mmBERT-base / mmBERT-small 防护检查，`choice_fit` | `hf:amyrmahdy/decima-guard`、`hf:amyrmahdy/decima-guard-small` |
+| `kev` | `kev-0.8b`、`kev-4b`、`kev-9b` | Qwen3.5 base + PEFT LoRA + pointer head；自动拉取声明的 base | `hf:jaredpalmer/kev-0.8b`、`hf:jaredpalmer/kev-4b`、`hf:jaredpalmer/kev-9b` |
+| `decision` | `Decision-1.0-Eos-0.8B` | Qwen3.5 0.8B 骨干 + endpoint head | `hf:vllm-sr/Decision-1.0-Eos-0.8B` |
+| `clef` | `clef-flash` | Qwen3.5 9B joint-schema head，BF16 约 18.8 GB | `hf:Cloudflare/clef-flash` |
+
+除 family README 另有说明外，所有 candle family 都支持 `choice`、`score`、
+`noul` 问题（Qwen3Guard 只接受预设问题；box 问题均不支持）。
+`sys1.toml.example` 与各 crate README 给出了准确的 checkpoint 布局和对应的
+上游数值对齐测试。
+
+验证状态：Laya 官方 golden logits、NLI（ModernBERT 与 DeBERTa-v3）、
+GLiClass、Qwen3Guard 0.6B、Von、Decision、Decima base/small/guard-small、
+Kev 0.8B/4B/9B 与 Clef flash 有对照上游实现或记录决策的 parity 测试；表中
+其余 checkpoint 使用相同的架构与布局，但没有逐一运行验证。
+
 ## Workspace
 
 | Crate | 职责 |
