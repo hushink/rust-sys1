@@ -198,6 +198,33 @@ LoRA 合并 + pointer head 参考在 1e-6 内一致（billing 0.900975，refund
 0.853919，urgency 0.953128）；12 GB CUDA 卡上 BF16 的误差在 0.003 内，
 单请求 83 ms。4B 的 BF16 权重加 LoRA 合并后可以放入 12 GB 显存。
 
+## Kev 9B 验证
+
+`jaredpalmer/kev-9b@2629c06a`（adapter 173 MB、`head.pt` 8.4 MB）与
+`Qwen/Qwen3.5-9B-Base@68c46c4b`（4 个分片共约 19 GB）的 SHA256 均与
+Hugging Face 一致。`head.pt` 记录温度 **2.297397**、base revision
+`68c46c4b…`；adapter 有 248 个 LoRA 对，merge scale 2.0。
+
+12 GiB 显存放不下 BF16 主干，因此与 Clef 一样使用 CPU + BF16。独立
+PyTorch 参考（transformers 的 BF16 主干、手动 LoRA 合并、pointer head）
+与 Rust 的结果：
+
+| 问题 | PyTorch BF16 | Rust BF16 |
+|---|---|---|
+| team | billing 0.976657 / tech 0.023343 | 0.978158 / 0.021842 |
+| refund | 0.920695 | 0.924340 |
+| urgency | [0.272992, 0.349913, 0.377095] | [0.267890, 0.349262, 0.382848] |
+| urgency score | 1.104103 | 1.114958 |
+
+概率差 ≤0.006，决策全部一致；差异来自 BF16 累加顺序。`predict` 跑 3 个
+问题约 **47 s**，加载后峰值内存约 19–20 GB。
+
+```bash
+$env:SYS1_KEV9B_TEST_DIR="C:/path/to/kev-9b"   # contains base/
+cargo test --release -p sys1-kev --test kev predicts_with_the_9b_checkpoint \
+  -- --ignored --nocapture --test-threads=1
+```
+
 ## Clef 9B 验证
 
 `Cloudflare/clef-flash` 的四个 BF16 shard 共约 18.8 GB，下载后与 Hugging Face

@@ -58,3 +58,15 @@ cargo test --release -p sys1-kev --test kev predicts_with_the_4b_checkpoint \
 
 4B 的 CPU F32 输出与独立的 PyTorch LoRA 合并 + pointer head 参考在 1e-6 内
 一致；12 GB CUDA 卡上的 BF16 输出误差在 0.003 内。
+
+9B checkpoint 需要约 19 GB 内存，4 个分片放不进 12 GB 显存，因此使用
+CPU BF16：
+
+```bash
+$env:SYS1_KEV9B_TEST_DIR="C:/models/kev-9b"   # 含 base/
+cargo test --release -p sys1-kev --test kev predicts_with_the_9b_checkpoint \
+  -- --ignored --nocapture --test-threads=1
+```
+
+BF16 概率与独立的 PyTorch BF16 参考相差不超过 0.006；`head.pt` 中的温度为
+2.297397。

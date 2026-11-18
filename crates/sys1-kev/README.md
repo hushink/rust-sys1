@@ -62,3 +62,15 @@ cargo test --release -p sys1-kev --test kev predicts_with_the_4b_checkpoint \
 The 4B numbers match an independent PyTorch LoRA-merge + pointer-head
 reference within 1e-6 on the CPU F32 path; BF16 on a 12 GB CUDA card is within
 0.003.
+
+The 9B checkpoint needs about 19 GB of RAM, so it runs BF16 on CPU (its
+4 shards do not fit a 12 GB card):
+
+```bash
+$env:SYS1_KEV9B_TEST_DIR="C:/models/kev-9b"   # contains base/
+cargo test --release -p sys1-kev --test kev predicts_with_the_9b_checkpoint \
+  -- --ignored --nocapture --test-threads=1
+```
+
+BF16 probabilities stay within 0.006 of the independent PyTorch BF16
+reference; `head.pt` carries temperature 2.297397.
