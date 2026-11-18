@@ -32,3 +32,33 @@ fn predicts_all_question_types() {
     let noul = output.answers.noul("billing").expect("noul");
     assert!((noul.noul - 0.5526355).abs() <= 1e-4);
 }
+
+#[test]
+#[ignore = "requires SYS1_NLI_DEBERTA_TEST_DIR pointing at deberta-v3-large-zeroshot-v2.0"]
+fn predicts_with_the_deberta_checkpoint() {
+    let directory = PathBuf::from(
+        std::env::var("SYS1_NLI_DEBERTA_TEST_DIR").expect("SYS1_NLI_DEBERTA_TEST_DIR"),
+    );
+    let model = NliModel::load_dir(&directory, NliOptions::default()).expect("load NLI model");
+    let state = State::text("I was charged twice for invoice 12345 and need a refund today.");
+    let questions = Questions::new()
+        .choice("tone", [("angry", "Upset"), ("calm", "Neutral")])
+        .score("urgency", ["Can wait", "This week", "Today"])
+        .noul("billing", "This message is about billing.");
+
+    let output = model.predict(&state, &questions).expect("predict");
+    let choice = output.answers.choice("tone").expect("choice");
+    assert_eq!(choice.choice, "angry");
+    assert!((choice.probabilities["angry"] - 0.859564).abs() <= 1e-4);
+    assert!((choice.probabilities["calm"] - 0.140436).abs() <= 1e-4);
+
+    let score = output.answers.score("urgency").expect("score");
+    for (index, want) in [(0, 0.190699), (1, 0.079292), (2, 0.730009)] {
+        let got = score.probabilities[&index.to_string()];
+        assert!((got - want).abs() <= 1e-4, "{index}: {got} vs {want}");
+    }
+    assert!((score.score - 1.539309).abs() <= 1e-4, "{}", score.score);
+
+    let noul = output.answers.noul("billing").expect("noul");
+    assert!((noul.noul - 0.998042).abs() <= 1e-4, "{}", noul.noul);
+}

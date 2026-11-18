@@ -1,7 +1,8 @@
-use crate::config::{NliConfig, Pooling};
+use crate::config::{NliConfig, NliEncoderConfig, Pooling};
+use crate::deberta::DebertaEncoder;
 use crate::render::{criterion, instructions_or_id, render_state};
 use candle_core::{DType, Device, Tensor};
-use candle_nn::{LayerNorm, Linear, VarBuilder, layer_norm_no_bias};
+use candle_nn::{Activation, LayerNorm, Linear, VarBuilder, layer_norm_no_bias};
 use indexmap::IndexMap;
 use std::path::Path;
 use sys1_core::{Answers, DecisionModel, DecisionOutput, ModelError, Prediction, Questions};
@@ -57,14 +58,46 @@ struct Row {
     ids: Vec<u32>,
 }
 
-/// A ModernBERT zero-shot NLI cross-encoder.
+enum EncoderKind {
+    Modern(Encoder),
+    Deberta(DebertaEncoder),
+}
+
+impl EncoderKind {
+    fn forward(
+        &self,
+        ids: &Tensor,
+        mask: &Tensor,
+        has_padding: bool,
+    ) -> Result<Tensor, ModelError> {
+        match self {
+            Self::Modern(encoder) => encoder
+                .forward(ids, mask, has_padding)
+                .map_err(inference_error),
+            Self::Deberta(encoder) => encoder.forward(ids, mask),
+        }
+    }
+}
+
+enum HeadKind {
+    Modern {
+        dense: Linear,
+        norm: LayerNorm,
+        classifier: Linear,
+    },
+    Deberta {
+        pooler: Linear,
+        classifier: Linear,
+        activation: Activation,
+    },
+}
+
+/// A zero-shot NLI cross-encoder.
 pub struct NliModel {
     tokenizer: Tokenizer,
     config: NliConfig,
-    encoder: Encoder,
-    head_dense: Linear,
-    head_norm: LayerNorm,
-    classifier: Linear,
+    encoder: EncoderKind,
+    head: HeadKind,
     device: Device,
     dtype: DType,
     max_len: usize,
@@ -106,40 +139,86 @@ impl NliModel {
         let tensors = candle_core::safetensors::load(&weights, &options.device)
             .map_err(|error| ModelError::load(format!("load {}: {error}", weights.display())))?;
         let vb = VarBuilder::from_tensors(tensors, options.dtype, &options.device);
-        let encoder = Encoder::load(vb.clone(), &config.encoder, options.dtype, false, "model")
-            .map_err(|error| ModelError::load(error.to_string()))?;
-
-        let hidden = config.encoder.hidden_size;
-        let head_dense = Linear::new(
-            vb.get((hidden, hidden), "head.dense.weight")
-                .map_err(|error| ModelError::load(error.to_string()))?
-                .to_dtype(options.dtype)
-                .map_err(|error| ModelError::load(error.to_string()))?,
-            None,
-        );
-        let head_norm =
-            layer_norm_no_bias(hidden, config.encoder.layer_norm_eps(), vb.pp("head.norm"))
-                .map_err(|error| ModelError::load(error.to_string()))?;
-        let classifier = Linear::new(
-            vb.get((2, hidden), "classifier.weight")
-                .map_err(|error| ModelError::load(error.to_string()))?
-                .to_dtype(options.dtype)
-                .map_err(|error| ModelError::load(error.to_string()))?,
-            Some(
-                vb.get(2, "classifier.bias")
-                    .map_err(|error| ModelError::load(error.to_string()))?
-                    .to_dtype(options.dtype)
-                    .map_err(|error| ModelError::load(error.to_string()))?,
-            ),
-        );
+        let hidden = config.encoder.hidden_size();
+        let (encoder, head) = match &config.encoder {
+            NliEncoderConfig::Modern(encoder_config) => {
+                let encoder =
+                    Encoder::load(vb.clone(), encoder_config, options.dtype, false, "model")
+                        .map_err(|error| ModelError::load(error.to_string()))?;
+                let dense = Linear::new(
+                    vb.get((hidden, hidden), "head.dense.weight")
+                        .map_err(|error| ModelError::load(error.to_string()))?
+                        .to_dtype(options.dtype)
+                        .map_err(|error| ModelError::load(error.to_string()))?,
+                    None,
+                );
+                let norm =
+                    layer_norm_no_bias(hidden, encoder_config.layer_norm_eps(), vb.pp("head.norm"))
+                        .map_err(|error| ModelError::load(error.to_string()))?;
+                let classifier = Linear::new(
+                    vb.get((2, hidden), "classifier.weight")
+                        .map_err(|error| ModelError::load(error.to_string()))?
+                        .to_dtype(options.dtype)
+                        .map_err(|error| ModelError::load(error.to_string()))?,
+                    Some(
+                        vb.get(2, "classifier.bias")
+                            .map_err(|error| ModelError::load(error.to_string()))?
+                            .to_dtype(options.dtype)
+                            .map_err(|error| ModelError::load(error.to_string()))?,
+                    ),
+                );
+                (
+                    EncoderKind::Modern(encoder),
+                    HeadKind::Modern {
+                        dense,
+                        norm,
+                        classifier,
+                    },
+                )
+            }
+            NliEncoderConfig::Deberta(encoder_config) => {
+                let encoder =
+                    DebertaEncoder::load(vb.pp("deberta"), encoder_config, &options.device)?;
+                let pooler = Linear::new(
+                    vb.get((hidden, hidden), "pooler.dense.weight")
+                        .map_err(|error| ModelError::load(error.to_string()))?
+                        .to_dtype(options.dtype)
+                        .map_err(|error| ModelError::load(error.to_string()))?,
+                    Some(
+                        vb.get(hidden, "pooler.dense.bias")
+                            .map_err(|error| ModelError::load(error.to_string()))?
+                            .to_dtype(options.dtype)
+                            .map_err(|error| ModelError::load(error.to_string()))?,
+                    ),
+                );
+                let classifier = Linear::new(
+                    vb.get((2, hidden), "classifier.weight")
+                        .map_err(|error| ModelError::load(error.to_string()))?
+                        .to_dtype(options.dtype)
+                        .map_err(|error| ModelError::load(error.to_string()))?,
+                    Some(
+                        vb.get(2, "classifier.bias")
+                            .map_err(|error| ModelError::load(error.to_string()))?
+                            .to_dtype(options.dtype)
+                            .map_err(|error| ModelError::load(error.to_string()))?,
+                    ),
+                );
+                (
+                    EncoderKind::Deberta(encoder),
+                    HeadKind::Deberta {
+                        pooler,
+                        classifier,
+                        activation: encoder_config.pooler_activation(),
+                    },
+                )
+            }
+        };
 
         Ok(Self {
             tokenizer,
             config,
             encoder,
-            head_dense,
-            head_norm,
-            classifier,
+            head,
             device: options.device,
             dtype: options.dtype,
             max_len,
@@ -320,42 +399,65 @@ impl NliModel {
                 .map_err(inference_error)?
                 .to_dtype(self.dtype)
                 .map_err(inference_error)?;
-            let hidden = self
-                .encoder
-                .forward(&ids, &mask, has_padding)
-                .map_err(inference_error)?;
-            let pooled = match self.config.pooling {
-                Pooling::Mean => {
-                    let mask3 = mask.unsqueeze(2).map_err(inference_error)?;
-                    let summed = hidden
-                        .broadcast_mul(&mask3)
+            let hidden = self.encoder.forward(&ids, &mask, has_padding)?;
+            let pooled = match &self.head {
+                HeadKind::Modern { dense, norm, .. } => {
+                    let pooled = match self.config.pooling {
+                        Pooling::Mean => {
+                            let mask3 = mask.unsqueeze(2).map_err(inference_error)?;
+                            let summed = hidden
+                                .broadcast_mul(&mask3)
+                                .map_err(inference_error)?
+                                .sum(1)
+                                .map_err(inference_error)?;
+                            let counts = mask
+                                .sum(1)
+                                .map_err(inference_error)?
+                                .unsqueeze(1)
+                                .map_err(inference_error)?;
+                            summed.broadcast_div(&counts).map_err(inference_error)?
+                        }
+                        Pooling::Cls => hidden
+                            .narrow(1, 0, 1)
+                            .map_err(inference_error)?
+                            .squeeze(1)
+                            .map_err(inference_error)?,
+                    };
+                    pooled
+                        .to_dtype(self.dtype)
                         .map_err(inference_error)?
-                        .sum(1)
-                        .map_err(inference_error)?;
-                    let counts = mask
-                        .sum(1)
+                        .contiguous()
                         .map_err(inference_error)?
-                        .unsqueeze(1)
-                        .map_err(inference_error)?;
-                    summed.broadcast_div(&counts).map_err(inference_error)?
+                        .apply(dense)
+                        .map_err(inference_error)?
+                        .gelu_erf()
+                        .map_err(inference_error)?
+                        .apply(norm)
+                        .map_err(inference_error)?
                 }
-                Pooling::Cls => hidden
+                HeadKind::Deberta {
+                    pooler, activation, ..
+                } => hidden
                     .narrow(1, 0, 1)
                     .map_err(inference_error)?
                     .squeeze(1)
+                    .map_err(inference_error)?
+                    .to_dtype(self.dtype)
+                    .map_err(inference_error)?
+                    .contiguous()
+                    .map_err(inference_error)?
+                    .apply(pooler)
+                    .map_err(inference_error)?
+                    .apply(activation)
                     .map_err(inference_error)?,
             };
-            let pooled = pooled
-                .to_dtype(self.dtype)
-                .map_err(inference_error)?
-                .apply(&self.head_dense)
-                .map_err(inference_error)?
-                .gelu_erf()
-                .map_err(inference_error)?
-                .apply(&self.head_norm)
-                .map_err(inference_error)?;
+            let classifier = match &self.head {
+                HeadKind::Modern { classifier, .. } | HeadKind::Deberta { classifier, .. } => {
+                    classifier
+                }
+            };
             let logits = pooled
-                .apply(&self.classifier)
+                .apply(classifier)
                 .map_err(inference_error)?
                 .to_dtype(DType::F32)
                 .map_err(inference_error)?;

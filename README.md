@@ -38,7 +38,7 @@ plus NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision 1.0 and Clef.
 | [`sys1-hub`](crates/sys1-hub/README.md) | Model sources and cache (Local / HF / ModelScope / HTTP) |
 | [`sys1-laya`](crates/sys1-laya/README.md) | Clean-room Laya implementation, router, ONNX export path |
 | [`sys1-modernbert`](crates/sys1-modernbert/README.md) | Shared candle ModernBERT encoder |
-| [`sys1-nli`](crates/sys1-nli/README.md) | ModernBERT zero-shot NLI decision model |
+| [`sys1-nli`](crates/sys1-nli/README.md) | ModernBERT / DeBERTa-v3 zero-shot NLI decision model |
 | [`sys1-gliclass`](crates/sys1-gliclass/README.md) | GLiClass uni-encoder decision model (32M edge) |
 | [`sys1-qwen`](crates/sys1-qwen/README.md) | Shared candle Qwen3 / Qwen3.5 decoder backbones |
 | [`sys1-qwen3guard`](crates/sys1-qwen3guard/README.md) | Qwen3Guard Gen fixed-preset safety model |
@@ -126,6 +126,7 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 
 # Candle families (auto-detected from the checkpoint layout):
 sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model nli=hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0
 sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
 sys1 serve --model qwen3guard=hf:Qwen/Qwen3Guard-Gen-0.6B
 sys1 serve --model von=hf:wfzyx/von

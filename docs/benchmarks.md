@@ -41,8 +41,10 @@ Qwen3.5 混合模型。
 
 | 模型 | 设备 | noul p50 (ms) | batch p50 (ms) | x8 p50 (ms) | x8 RPS |
 |---|---:|---:|---:|---:|---:|
-| NLI | CPU | 54.6 | 159.6 | 162.7 | 45.8 |
-| NLI | CUDA | 18.6 | 23.0 | 225.2 | 33.7 |
+| NLI (ModernBERT) | CPU | 54.6 | 159.6 | 162.7 | 45.8 |
+| NLI (ModernBERT) | CUDA | 18.6 | 23.0 | 225.2 | 33.7 |
+| NLI (DeBERTa-v3-large) | CPU | 382.2 | 1532.2 | 1590.2 | 4.9 |
+| NLI (DeBERTa-v3-large) | CUDA | 30.2 | 78.7 | 240.5 | 31.8 |
 | GLiClass | CPU | 15.1 | 42.4 | 27.7 | 213.1 |
 | GLiClass | CUDA | 18.7 | 12.4 | 116.8 | 62.1 |
 | Von | CPU | 276.2 | 491.5 | 1684.4 | 3.9 |
@@ -88,7 +90,8 @@ CUDA 构建分别使用 `--features cuda` 和 `--features cudnn`，dtype 均为 
 
 | 模型 | CUDA noul | CUDA x8 | cuDNN noul | cuDNN x8 |
 |---|---:|---:|---:|---:|
-| NLI | 17.5 | 36.6 | 18.4 | 36.8 |
+| NLI (ModernBERT) | 17.5 | 36.6 | 18.4 | 36.8 |
+| NLI (DeBERTa-v3-large) | 22.8 | 28.3 | — | — |
 | GLiClass | 11.2 | 72.3 | 16.4 | 72.0 |
 | Von | 25.0 | 27.9 | 26.2 | 27.8 |
 | Decima-small | 18.1 | 39.8 | 20.4 | 39.7 |
@@ -137,6 +140,14 @@ GLiClass/Von/Decima-small 这类小编码器变慢（2%–45%）；x8 吞吐基�
   约 20%。cuDNN 没有稳定收益。
 - **Clef 9B**：权重约 18.8 GB，超出 12 GiB 显存；CPU F32 需要约 36 GB 内存。
   使用 BF16 CPU 的验证结果见下一节（下载/验证完成后更新）。
+
+## DeBERTa-v3 NLI 验证
+
+`MoritzLaurer/deberta-v3-large-zeroshot-v2.0@cf44676c`（870 MB F16）的
+`model.safetensors` SHA256 与 Hugging Face 一致。新的 disentangled attention
+编码器在 choice/score/noul 三类问题上与 transformers 的 F32 结果在 1e-4 内
+一致（tone 0.859564/0.140436，urgency 1.539309，noul 0.998042）。
+CPU 单请求 382 ms；CUDA F16 23 ms，8 并发 28 RPS。
 
 ## Kev 4B 验证
 

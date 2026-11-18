@@ -37,7 +37,7 @@
 | [`sys1-hub`](crates/sys1-hub/README.zh-CN.md) | 模型源与缓存（Local / HF / ModelScope / HTTP） |
 | [`sys1-laya`](crates/sys1-laya/README.zh-CN.md) | clean-room Laya 实现、Router、ONNX 导出路径 |
 | [`sys1-modernbert`](crates/sys1-modernbert/README.zh-CN.md) | 共享 candle ModernBERT 编码器 |
-| [`sys1-nli`](crates/sys1-nli/README.zh-CN.md) | ModernBERT zero-shot NLI 决策模型 |
+| [`sys1-nli`](crates/sys1-nli/README.zh-CN.md) | ModernBERT / DeBERTa-v3 zero-shot NLI 决策模型 |
 | [`sys1-gliclass`](crates/sys1-gliclass/README.zh-CN.md) | GLiClass uni-encoder 决策模型（32M edge） |
 | [`sys1-qwen`](crates/sys1-qwen/README.zh-CN.md) | 共享 candle Qwen3 / Qwen3.5 解码器骨干 |
 | [`sys1-qwen3guard`](crates/sys1-qwen3guard/README.zh-CN.md) | Qwen3Guard Gen 固定预设安全模型 |
@@ -121,6 +121,7 @@ sys1 serve --model laya-latest=local:/path/to/convaiinnovations/laya
 
 # 小型 candle 模型族（从 checkpoint config 自动识别）：
 sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model nli=hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0
 sys1 serve --model gliclass=hf:knowledgator/gliclass-instruct-edge-v1.0
 ```
 

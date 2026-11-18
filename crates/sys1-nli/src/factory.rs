@@ -78,8 +78,8 @@ impl ModelFactory for NliFactory {
     }
 }
 
-/// Whether `directory` is a ModernBERT zero-shot NLI checkpoint laid out like
-/// the `MoritzLaurer/*-zeroshot-v2.0` repositories.
+/// Whether `directory` is a ModernBERT or DeBERTa-v3 zero-shot NLI checkpoint
+/// laid out like the `MoritzLaurer/*-zeroshot-v2.0` repositories.
 pub fn is_nli_directory(directory: &Path) -> bool {
     if directory.join("option_marker.pt").is_file() {
         return false;
@@ -97,7 +97,10 @@ pub fn is_nli_directory(directory: &Path) -> bool {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
         return false;
     };
-    if value.get("model_type").and_then(serde_json::Value::as_str) != Some("modernbert") {
+    if !matches!(
+        value.get("model_type").and_then(serde_json::Value::as_str),
+        Some("modernbert" | "deberta-v2")
+    ) {
         return false;
     }
     value

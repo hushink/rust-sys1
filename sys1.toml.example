@@ -95,6 +95,7 @@ laya-latest = "local:D:/models/laya"
 # laya-typed-decisions = "https://example.com/models/laya-typed-decisions/model.json"
 # Candle families are detected from the checkpoint layout/config:
 # nli = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+# nli-deberta = "hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
 # gliclass = "hf:knowledgator/gliclass-instruct-edge-v1.0"
 # qwen3guard = "hf:Qwen/Qwen3Guard-Gen-0.6B"
 # von = "hf:wfzyx/von"

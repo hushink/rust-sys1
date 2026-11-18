@@ -2,7 +2,8 @@
 
 [简体中文](README.zh-CN.md)
 
-Zero-shot NLI decision model (`nli-pairs-v1`) on candle ModernBERT.
+Zero-shot NLI decision model (`nli-pairs-v1`) on candle ModernBERT or
+DeBERTa-v3.
 
 Each option becomes a hypothesis; one `[CLS] state [SEP] hypothesis [SEP]` row
 is encoded per option, and the entailment logit becomes that option's score.
@@ -10,14 +11,22 @@ Choice/score answers use a softmax over option logits; `noul` with both
 descriptions is a two-hypothesis softmax, and a `noul` without descriptions is
 one row read as `[not_entailment, entailment]` (sigmoid).
 
+DeBERTa-v3 uses disentangled attention: content-to-content, content-to-position
+and position-to-content scores with a shared layer-normalized relative-position
+table (256 buckets). Its zeroshot-v2.0 checkpoints use the
+`The answer to "{instructions}" is: …` templates; ModernBERT keeps
+`{description}` / `This text is about {label}.`.
+
 ## Checkpoints
 
 - `MoritzLaurer/ModernBERT-base-zeroshot-v2.0` (150M, ~299 MB safetensors).
 - `MoritzLaurer/ModernBERT-large-zeroshot-v2.0` (395M, ~792 MB).
+- `MoritzLaurer/deberta-v3-large-zeroshot-v2.0` (435M, ~870 MB F16; the most
+  accurate encoder in the upstream series).
 
-Both are English, Apache-2.0, and trained for 512-token premise/hypothesis
-pairs. The directory needs `config.json`, `model.safetensors`, and
-`tokenizer.json`.
+All are English, permissively licensed, and trained for 512-token
+premise/hypothesis pairs. The directory needs `config.json`,
+`model.safetensors`, and `tokenizer.json`.
 
 ## Usage
 
@@ -39,10 +48,12 @@ CLI / server:
 sys1 run local:/path/to/nli-modernbert-base --input request.json
 sys1 serve --model nli=local:/path/to/nli-modernbert-base
 sys1 serve --model nli=hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0
+sys1 serve --model nli=hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0
 ```
 
-The family is detected from `config.json` (`model_type = "modernbert"` plus an
-`entailment` label), so the same `local:`/`hf:` paths work with pull/show/rm.
+The family is detected from `config.json` (`model_type` `modernbert` or
+`deberta-v2`, plus an `entailment` label), so the same `local:`/`hf:` paths
+work with pull/show/rm.
 
 ## Options
 
@@ -58,11 +69,15 @@ The family is detected from `config.json` (`model_type = "modernbert"` plus an
 ```powershell
 $env:SYS1_NLI_TEST_DIR="D:/models/nli-modernbert-base"
 cargo test -p sys1-nli --test nli -- --ignored --nocapture
+
+$env:SYS1_NLI_DEBERTA_TEST_DIR="D:/models/deberta-v3-large-zeroshot-v2.0"
+cargo test -p sys1-nli --test nli predicts_with_the_deberta_checkpoint \
+  -- --ignored --nocapture
 ```
 
-For the shared sentence in the test, choice probabilities, score
-probabilities, and `noul` match the upstream `AutoModelForSequenceClassification`
-forward within 1e-4.
+For the shared sentence in the tests, choice probabilities, score
+probabilities, and `noul` match the upstream
+`AutoModelForSequenceClassification` forward within 1e-4 for both encoders.
 
 ## Limits
 
