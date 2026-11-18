@@ -106,6 +106,21 @@ GLiClass/Von/Decima-small 这类小编码器变慢（2%–45%）；x8 吞吐基�
 构建 cuDNN 时需要把 `cudnn.lib` 所在目录加入 `LIB`（本机为
 `D:\Applications\cudnn-windows\lib\x64`），运行时 DLL 目录需在 `PATH`。
 
+## TF32
+
+`--tf32`（或 `[server] tf32 = true`）只影响 CUDA 上的 F32 GEMM；F16/BF16
+路径不变。RTX 3060、F32、单请求、无并发：
+
+| 模型 | 场景 | F32 | F32 + TF32 |
+|---|---|---:|---:|
+| DeBERTa-v3 NLI | noul p50 | 33.4 ms | 32.6 ms |
+| DeBERTa-v3 NLI | noul+score+choice p50 | 79.7 ms | 70.6 ms |
+| Decima guard-small | noul p50 | 36.1 ms | 31.9 ms |
+| Decima guard-small | noul+score+choice p50 | 105.5 ms | 120.3 ms |
+
+大编码器的多问题请求有约 10% 收益；小编码器在运行间波动内。TF32 的尾数
+精度低于 F32，对数值敏感的对比应继续用 F32/F16 或 BF16。
+
 ## 跨请求批处理
 
 `sys1 serve` 默认把同一模型上的并发请求合并为一次前向。CPU 上的对比：

@@ -9,7 +9,7 @@
 | 命令 | 作用 |
 |---|---|
 | `sys1 serve` | 启动 HTTP 服务 |
-| `sys1 pull <ref>` | 下载/物化模型 |
+| `sys1 pull <ref>` | 下载/物化模型（进度输出到 stderr） |
 | `sys1 list` | 列出缓存模型 |
 | `sys1 show <ref>` | 打印解析后的 manifest |
 | `sys1 rm <ref>` | 删除缓存模型 |

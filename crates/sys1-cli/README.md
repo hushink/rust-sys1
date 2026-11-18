@@ -9,7 +9,7 @@ The `sys1` binary: model hub, one-shot inference, and TypeSafe-compatible server
 | Command | Purpose |
 |---|---|
 | `sys1 serve` | Run the HTTP server |
-| `sys1 pull <ref>` | Download/materialize a model |
+| `sys1 pull <ref>` | Download/materialize a model (progress on stderr) |
 | `sys1 list` | List cached models |
 | `sys1 show <ref>` | Print a resolved manifest |
 | `sys1 rm <ref>` | Remove a cached model |
