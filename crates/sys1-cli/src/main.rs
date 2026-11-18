@@ -14,10 +14,10 @@ use reload::HubConfigReloader;
 use source::HubModelResolver;
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
+use std::io::{IsTerminal, Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use sys1_core::{
     DecisionModel, DevicePreference, LongContextOptions, MinConfidence, ModelError, ModelManifest,
@@ -1070,7 +1070,90 @@ fn pull_model(hub: &Hub, reference: &str) -> anyhow::Result<PulledModel> {
             return synthesise_local(&path);
         }
     }
-    Ok(hub.pull(reference)?)
+    let display = PullDisplay::new();
+    Ok(hub.pull_with_observer(reference, Some(&display))?)
+}
+
+/// Prints pull progress on stderr: one updating line on a terminal, a line per
+/// 10% and per file otherwise. Fully cached pulls stay quiet.
+struct PullDisplay {
+    interactive: bool,
+    state: Mutex<PullDisplayState>,
+}
+
+#[derive(Default)]
+struct PullDisplayState {
+    active: bool,
+    finished: bool,
+    file: String,
+    percent: u32,
+    milestone: u32,
+}
+
+impl PullDisplay {
+    fn new() -> Self {
+        Self {
+            interactive: std::io::stderr().is_terminal(),
+            state: Mutex::new(PullDisplayState::default()),
+        }
+    }
+}
+
+impl sys1_hub::PullObserver for PullDisplay {
+    fn on_progress(&self, progress: &sys1_hub::PullProgress<'_>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.active && progress.file_downloaded < progress.file_total {
+            state.active = true;
+        }
+        if !state.active {
+            return;
+        }
+        let percent = progress
+            .total_downloaded
+            .saturating_mul(100)
+            .checked_div(progress.total_bytes)
+            .map(|value| value.min(100) as u32)
+            .unwrap_or(100);
+        let changed = progress.file != state.file || percent != state.percent;
+        if self.interactive {
+            if changed {
+                eprint!(
+                    "\r  {:>3}%  [{} of {}] {}  {} / {}    ",
+                    percent,
+                    progress.file_index,
+                    progress.file_count,
+                    progress.file,
+                    format_bytes(progress.total_downloaded),
+                    format_bytes(progress.total_bytes)
+                );
+                let _ = std::io::stderr().flush();
+                state.file = progress.file.to_owned();
+                state.percent = percent;
+            }
+            if progress.total_downloaded >= progress.total_bytes && !state.finished {
+                eprintln!();
+                state.finished = true;
+            }
+        } else {
+            let milestone = percent / 10;
+            if progress.file != state.file || milestone != state.milestone {
+                eprintln!(
+                    "  pulling [{} of {}] {} ({}%)",
+                    progress.file_index, progress.file_count, progress.file, percent
+                );
+                state.file = progress.file.to_owned();
+                state.percent = percent;
+                state.milestone = milestone;
+            }
+            if progress.total_downloaded >= progress.total_bytes && !state.finished {
+                eprintln!("  pulled {}", format_bytes(progress.total_bytes));
+                state.finished = true;
+            }
+        }
+    }
 }
 
 fn synthesise_local(directory: &Path) -> anyhow::Result<PulledModel> {

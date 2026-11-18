@@ -50,6 +50,11 @@ println!("{} at {}", pulled.manifest.name, pulled.directory.display());
 `pull` 返回 `PulledModel`（manifest、目录、每个文件的路径）。`resolve` 只解析
 manifest，不下载文件。
 
+`pull_with_observer(reference, Some(&observer))` 会回报 `PullProgress`（文件、
+序号、已写入字节、总字节）；每 MiB 最多一次，并在每个文件边界各一次。任意
+`Fn(&PullProgress)` 都自动实现 `PullObserver`；`sys1 pull` 与 `sys1 serve`
+用它向 stderr 输出进度行。
+
 ## 缓存与网络行为
 
 - 缓存 key 稳定、适合文件系统、带哈希。

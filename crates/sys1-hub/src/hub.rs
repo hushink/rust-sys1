@@ -1,6 +1,6 @@
 use crate::{
     HfSource, HttpSource, HubConfig, HubError, LocalSource, ModelRef, ModelScopeSource,
-    ModelSource, SourceContext, download,
+    ModelSource, PullObserver, SourceContext, download, progress::FileProgress,
 };
 use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
@@ -211,13 +211,19 @@ impl Hub {
 
     /// Resolve and materialize a model.
     pub fn pull(&self, reference: &str) -> Result<PulledModel, HubError> {
+        self.pull_with_observer(reference, None)
+    }
+
+    /// Resolve and materialize a model, reporting per-file progress to
+    /// `observer`. Without an observer this is [`Hub::pull`].
+    pub fn pull_with_observer(
+        &self,
+        reference: &str,
+        observer: Option<&dyn PullObserver>,
+    ) -> Result<PulledModel, HubError> {
         let reference: ModelRef = reference.parse()?;
         let source = self.source_for(&reference)?;
         let manifest = self.resolve_ref(&reference, &source)?;
-        let context = SourceContext {
-            client: &self.client,
-            config: &self.config,
-        };
 
         if let Some(directory) = source.local_directory(&reference) {
             let mut files = IndexMap::new();
@@ -248,10 +254,28 @@ impl Hub {
 
         fs::create_dir_all(&model_dir).map_err(|error| HubError::io(&model_dir, error))?;
 
+        let total_bytes: u64 = manifest.files.iter().map(|file| file.size).sum();
+        let file_count = manifest.files.len();
+        let mut materialized = 0_u64;
         let mut files = IndexMap::new();
-        for file in &manifest.files {
+        for (index, file) in manifest.files.iter().enumerate() {
             let destination = model_dir.join(&file.path);
+            let progress = observer.map(|observer| {
+                FileProgress::new(
+                    observer,
+                    &file.path,
+                    index + 1,
+                    file_count,
+                    file.size,
+                    materialized,
+                    total_bytes,
+                )
+            });
             if download::verify_file(&destination, Some(file.size), file.sha256.as_deref())? {
+                if let Some(progress) = &progress {
+                    progress.report(file.size);
+                }
+                materialized += file.size;
                 files.insert(file.path.clone(), destination);
                 continue;
             }
@@ -262,8 +286,17 @@ impl Hub {
                     destination.display()
                 )));
             }
+            let context = SourceContext {
+                client: &self.client,
+                config: &self.config,
+                progress: progress.as_ref(),
+            };
             source.fetch(&reference, file, &destination, &context)?;
             download::verify_complete(&destination, Some(file.size), file.sha256.as_deref())?;
+            if let Some(progress) = &progress {
+                progress.report(file.size);
+            }
+            materialized += file.size;
             files.insert(file.path.clone(), destination);
         }
 
@@ -663,6 +696,7 @@ impl Hub {
         let context = SourceContext {
             client: &self.client,
             config: &self.config,
+            progress: None,
         };
         let manifest = source.resolve(reference, &context)?;
         manifest.validate()?;

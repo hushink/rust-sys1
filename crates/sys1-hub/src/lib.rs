@@ -10,6 +10,7 @@ mod http;
 mod hub;
 mod local;
 mod modelscope;
+pub mod progress;
 mod reference;
 mod source;
 
@@ -23,5 +24,6 @@ pub use hub::{
 };
 pub use local::LocalSource;
 pub use modelscope::ModelScopeSource;
+pub use progress::{PullObserver, PullProgress};
 pub use reference::ModelRef;
 pub use source::{ModelSource, SourceContext, default_cache_key};

@@ -325,6 +325,49 @@ fn pulls_a_static_http_manifest_and_file() {
 }
 
 #[test]
+fn reports_pull_progress() {
+    let content: Vec<u8> = (0..2 * 1024 * 1024 + 512)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    let server = TestServer::start(&content, None);
+    let temp = tempfile::tempdir().expect("temp dir");
+    let hub = hub(&temp.path().join("cache"));
+
+    let samples = Mutex::new(Vec::new());
+    let observer = |progress: &sys1_hub::PullProgress<'_>| {
+        samples.lock().unwrap().push((
+            progress.file.to_owned(),
+            progress.file_downloaded,
+            progress.file_total,
+            progress.total_downloaded,
+            progress.total_bytes,
+        ));
+    };
+    hub.pull_with_observer(&server.base_url, Some(&observer))
+        .expect("HTTP pull with progress");
+
+    let samples = samples.into_inner().unwrap();
+    assert!(samples.len() >= 3, "{samples:?}");
+    assert_eq!(samples.first().unwrap().3, 0, "{samples:?}");
+    let last = samples.last().unwrap();
+    assert_eq!(last.0, "weights.bin");
+    assert_eq!(last.1, content.len() as u64);
+    assert_eq!(last.2, content.len() as u64);
+    assert_eq!(last.3, content.len() as u64);
+    assert_eq!(last.4, content.len() as u64);
+
+    // A cache hit verifies the file; it reports completion but never a partial
+    // byte count, which keeps the CLI quiet for already-pulled models.
+    let cached = Mutex::new(Vec::new());
+    let observer = |progress: &sys1_hub::PullProgress<'_>| {
+        cached.lock().unwrap().push(progress.file_downloaded);
+    };
+    hub.pull_with_observer(&server.base_url, Some(&observer))
+        .expect("cached pull");
+    assert_eq!(cached.into_inner().unwrap(), vec![content.len() as u64]);
+}
+
+#[test]
 fn resumes_a_partial_download_with_range() {
     let content = b"0123456789abcdefghijklmnopqrstuvwxyz";
     let server = TestServer::start(content, None);

@@ -50,6 +50,11 @@ println!("{} at {}", pulled.manifest.name, pulled.directory.display());
 `pull` returns a `PulledModel` with the manifest, directory, and per-file paths.
 `resolve` returns a manifest without downloading files.
 
+`pull_with_observer(reference, Some(&observer))` reports `PullProgress`
+samples (file, index, bytes written, total bytes) at most once per MiB and at
+each file boundary. Any `Fn(&PullProgress)` is a `PullObserver`; `sys1 pull`
+and `sys1 serve` use it to draw a progress line on stderr.
+
 ## Cache and network behavior
 
 - Cache keys are stable, filesystem-safe, and hashed.

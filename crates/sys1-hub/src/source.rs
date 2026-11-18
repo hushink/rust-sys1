@@ -6,6 +6,8 @@ use sys1_core::{ModelFile, ModelManifest};
 pub struct SourceContext<'a> {
     pub client: &'a reqwest::blocking::Client,
     pub config: &'a HubConfig,
+    /// Present when the caller asked for pull progress.
+    pub progress: Option<&'a crate::progress::FileProgress<'a>>,
 }
 
 /// A source of model manifests and files.

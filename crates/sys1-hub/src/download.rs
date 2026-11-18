@@ -11,6 +11,9 @@ const MAX_ATTEMPTS: u8 = 4;
 /// Consecutive attempts that add no bytes before giving up. A timed-out
 /// attempt keeps its partial file, so large downloads resume across attempts.
 const MAX_STALLS: u8 = 3;
+/// Bytes between progress reports; keeps a fast download from flooding the
+/// observer while still updating a terminal several times per second.
+const PROGRESS_STEP: u64 = 1024 * 1024;
 
 /// Verify an existing file without treating a mismatch as an error.
 pub(crate) fn verify_file(
@@ -108,7 +111,7 @@ pub(crate) fn download_http(
 
     let mut attempts = 0_u8;
     let mut stalls = 0_u8;
-    loop {
+    'attempts: loop {
         let before = offset;
         let mut request = context
             .client
@@ -184,25 +187,61 @@ pub(crate) fn download_http(
         };
 
         let mut reader = response;
-        if let Err(error) = std::io::copy(&mut reader, &mut file) {
-            drop(file);
-            let after = fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
-            offset = after;
-            if after > before {
-                stalls = 0;
-            } else {
-                stalls += 1;
+        if let Some(progress) = context.progress {
+            progress.report(offset);
+        }
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut downloaded = offset;
+        let mut last_report = offset;
+        loop {
+            let read = match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(error) => {
+                    drop(file);
+                    let after = fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
+                    offset = after;
+                    if after > before {
+                        stalls = 0;
+                    } else {
+                        stalls += 1;
+                    }
+                    if stalls >= MAX_STALLS {
+                        return Err(HubError::io(&partial, error));
+                    }
+                    // Keep the partial file: the next attempt resumes with a
+                    // range request from the bytes that did arrive.
+                    continue 'attempts;
+                }
+            };
+            if let Err(error) = file.write_all(&buffer[..read]) {
+                drop(file);
+                let after = fs::metadata(&partial).map(|meta| meta.len()).unwrap_or(0);
+                offset = after;
+                if after > before {
+                    stalls = 0;
+                } else {
+                    stalls += 1;
+                }
+                if stalls >= MAX_STALLS {
+                    return Err(HubError::io(&partial, error));
+                }
+                continue 'attempts;
             }
-            if stalls >= MAX_STALLS {
-                return Err(HubError::io(&partial, error));
+            downloaded += read as u64;
+            if downloaded - last_report >= PROGRESS_STEP {
+                if let Some(progress) = context.progress {
+                    progress.report(downloaded);
+                }
+                last_report = downloaded;
             }
-            // Keep the partial file: the next attempt resumes with a range
-            // request from the bytes that did arrive.
-            continue;
         }
         file.flush()
             .map_err(|error| HubError::io(&partial, error))?;
         drop(file);
+        if let Some(progress) = context.progress {
+            progress.report(downloaded);
+        }
 
         match verify_complete(&partial, expected_size, expected_sha256) {
             Ok(()) => {
