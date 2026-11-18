@@ -139,7 +139,7 @@ GLiClass/Von/Decima-small 这类小编码器变慢（2%–45%）；x8 吞吐基�
   矩阵见上节；编码器与 Qwen3Guard 均优于 F32，Kev/Decision 也比 F32 再快
   约 20%。cuDNN 没有稳定收益。
 - **Clef 9B**：权重约 18.8 GB，超出 12 GiB 显存；CPU F32 需要约 36 GB 内存。
-  使用 BF16 CPU 的验证结果见下一节（下载/验证完成后更新）。
+  使用 BF16 CPU 的验证结果见“Clef 9B 验证”一节。
 
 ## DeBERTa-v3 NLI 验证
 
@@ -148,6 +148,32 @@ GLiClass/Von/Decima-small 这类小编码器变慢（2%–45%）；x8 吞吐基�
 编码器在 choice/score/noul 三类问题上与 transformers 的 F32 结果在 1e-4 内
 一致（tone 0.859564/0.140436，urgency 1.539309，noul 0.998042）。
 CPU 单请求 382 ms；CUDA F16 23 ms，8 并发 28 RPS。
+
+## Decima v2（guard-small）验证
+
+`amyrmahdy/decima-guard-small@ac110248` 是 decima v2 布局：mmBERT-small
+（384 维、22 层、6 头）、`choice_fit: true`、`question_in_state: true`、
+`max_state_tokens: 2048`、`max_choice_tokens: 64`、温度 0.754586。
+encoder 562 MB + head 18 MB，全部下载完成后可直接加载。
+
+与作者代码 `decima@1b07634e`（v2.3.0，经 Ollaya 的独立参考封装）的 F32
+结果对比：
+
+| 问题 | 上游 log-probs | Rust |
+|---|---|---|
+| team choice | [−0.003964, −5.532571] | [−0.003963, −5.532570] |
+| urgent noul | 0.414360（P(yes)） | 0.414360 |
+| anger score | [0.429440, 0.357271, 0.213289] | [0.429440, 0.357271, 0.213289] |
+| 长问题 choice（触发 `choice_fit`） | billing 0.920987 | 0.920987 |
+
+长问题超过 64 token 时，两边都生成
+`<问题词前缀> … <完整选项>` 的对比行（选项保持完整，问题按词边界二分缩短），
+说明 v2 的 option-fit 渲染与上游 `render.choice_texts` 一致。
+
+```bash
+$env:SYS1_DECIMA_GUARD_SMALL_TEST_DIR="C:/path/to/decima-guard-small"
+cargo test -p sys1-decima --test decima predicts_with_the_guard_small_checkpoint -- --ignored
+```
 
 ## Kev 4B 验证
 
