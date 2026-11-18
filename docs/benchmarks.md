@@ -1,5 +1,7 @@
 # 新模型族压测（2026-11-18）
 
+[English](benchmarks.en.md)
+
 本文记录 NLI、GLiClass、Von、Decima（base / small）、Qwen3Guard、Kev 与
 Decision 在 CPU 和 CUDA 上的 HTTP 压测结果。测试通过 `sys1 serve` 的
 `/v1/systemone` 接口完成，工具为 `uv run sys1-bench`。
