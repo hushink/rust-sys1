@@ -14,7 +14,7 @@ The `sys1` binary: model hub, one-shot inference, and TypeSafe-compatible server
 | `sys1 show <ref>` | Print a resolved manifest |
 | `sys1 rm [--with-deps] <ref>` | Remove a cached model; `--with-deps` also removes an unused Kev base |
 | `sys1 run <ref> --input request.json` | One-shot inference |
-| `sys1 doctor` | Print build/device/cache diagnostics |
+| `sys1 doctor` | Print build/device/cache diagnostics and the effective families |
 
 ## Model references
 
@@ -312,7 +312,9 @@ cargo build --release -p sys1-cli --features ort-tensorrt
 `--no-default-features` when ONNX Runtime should not be part of the binary.
 `ort-cuda`, `ort-tensorrt`, `ort-directml`, and `ort-coreml` enable ONNX
 Runtime execution providers and require the matching SDK/runtime. `sys1 doctor`
-prints compiled features and the resolved device.
+prints compiled features, the resolved device, cache usage, the effective
+`[families]` values (with `(default)` / `(checkpoint)` markers), and each
+`[models]` entry with a `(families)` tag when it carries per-model overrides.
 
 ## Request file
 

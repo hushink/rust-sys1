@@ -838,6 +838,70 @@ fn doctor_command(
         hub.config().download_timeout.as_secs()
     );
     println!("  offline: {}", hub.config().offline);
+    let families = config.value.families.to_options();
+    println!("  families:");
+    println!("    max_batch = {}", families.batch_size());
+    for (name, value) in [
+        ("qwen3guard.max_len", families.qwen3guard.max_len),
+        ("von.max_len", families.von.max_len),
+        ("clef.max_len", families.clef.max_len),
+    ] {
+        println!(
+            "    {name} = {}",
+            value
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "(default)".to_owned())
+        );
+    }
+    println!(
+        "    decima.choice_fit = {}",
+        families
+            .decima
+            .choice_fit
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "(checkpoint)".to_owned())
+    );
+    println!(
+        "    kev.base_dir = {}",
+        families
+            .kev
+            .base_dir
+            .as_deref()
+            .map(Path::display)
+            .map(|path| path.to_string())
+            .unwrap_or_else(|| "(declared by the adapter)".to_owned())
+    );
+    println!(
+        "    kev.temperature = {}",
+        families
+            .kev
+            .temperature
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "(checkpoint)".to_owned())
+    );
+    println!(
+        "    decision.temperature = {}",
+        families
+            .decision
+            .temperature
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "(checkpoint)".to_owned())
+    );
+    if !config.value.models.is_empty() {
+        println!("  models:");
+        for (name, entry) in &config.value.models {
+            let overrides = match entry {
+                crate::config::ModelEntry::Reference(_) => "",
+                crate::config::ModelEntry::Detailed(detail)
+                    if detail.families == Default::default() =>
+                {
+                    ""
+                }
+                crate::config::ModelEntry::Detailed(_) => " (families)",
+            };
+            println!("    {name} = {}{overrides}", entry.reference());
+        }
+    }
     Ok(())
 }
 

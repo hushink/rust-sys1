@@ -14,7 +14,7 @@
 | `sys1 show <ref>` | 打印解析后的 manifest |
 | `sys1 rm [--with-deps] <ref>` | 删除缓存模型；`--with-deps` 同时删除无人使用的 Kev base |
 | `sys1 run <ref> --input request.json` | 单次推理 |
-| `sys1 doctor` | 打印构建/设备/缓存诊断 |
+| `sys1 doctor` | 打印构建/设备/缓存诊断与生效的 family 设置 |
 
 ## 模型引用
 
@@ -288,7 +288,9 @@ cargo build --release -p sys1-cli --features ort-tensorrt
 `onnx` 属于默认 features。若二进制不需要 ONNX Runtime，可用
 `--no-default-features` 关闭。`ort-cuda`、`ort-tensorrt`、`ort-directml`、
 `ort-coreml` 启用 ONNX Runtime 执行提供器，需要对应的 SDK/运行时。
-`sys1 doctor` 输出编译 feature 与解析后的设备。
+`sys1 doctor` 输出编译 feature、解析后的设备、缓存用量、生效的 `[families]`
+值（用 `(default)` / `(checkpoint)` 标记来源），以及每个 `[models]` 条目；
+带按模型覆盖的条目会标记 `(families)`。
 
 ## 请求文件
 
