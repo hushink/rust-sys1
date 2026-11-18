@@ -37,6 +37,11 @@ rust-sys1 的模型源、manifest 解析与磁盘缓存。
 `sha256` 可选；HF 非 LFS 文件用 `git_sha1` 兜底。路径必须是相对路径、使用正斜杠、
 且不能包含 `..`。
 
+完整的静态模型中心协议（每个字段及校验规则、相对 URL 解析、HTTP 鉴权/续传
+行为，以及 `laya-typed-decisions` 示例）见
+[`docs/model-manifest.zh-CN.md`](../../docs/model-manifest.zh-CN.md)
+（[English](../../docs/model-manifest.md)）。
+
 ## 示例
 
 ```rust

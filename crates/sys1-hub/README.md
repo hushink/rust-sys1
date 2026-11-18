@@ -37,6 +37,11 @@ Syntax: `scheme:location[@revision][#subfolder]`.
 `sha256` is optional; HF non-LFS files fall back to `git_sha1`. Paths must be
 relative, use forward slashes, and contain no `..`.
 
+The complete static-center contract — every field and its validation, relative
+URL resolution, HTTP authentication/resume behavior, and a `laya-typed-decisions`
+example — is in [`docs/model-manifest.md`](../../docs/model-manifest.md)
+([简体中文](../../docs/model-manifest.zh-CN.md)).
+
 ## Example
 
 ```rust

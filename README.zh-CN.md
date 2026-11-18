@@ -21,7 +21,8 @@
 - candle 版 Laya：ModernBERT、decision head、校准、batch、两种 confidence。
 - 可选 ONNX Runtime 后端：支持 Laya ONNX 导出，以及 CUDA / TensorRT / DirectML / CoreML 执行提供器。
 - 纯 NumPy 的 Laya→ONNX 导出器，与官方 golden logits 最大误差 2.5e-6。
-- 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心。
+- 模型源：本地路径、Hugging Face、ModelScope、静态 HTTP manifest 中心
+  （[manifest 结构](docs/model-manifest.zh-CN.md)）。
 - 缓存：sha256、HTTP Range 断点续传、离线模式、并发拉取锁、按字节配额 LRU 淘汰。
 - 单进程服务：注册表、懒加载、LRU、keep_alive、`spawn_blocking` 推理、gzip/zstd 请求。
 - 运行时模型管理：无需重启即可加载、卸载、重载、添加和移除模型。

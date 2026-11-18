@@ -93,6 +93,7 @@ laya-latest = "local:D:/models/laya"
 # laya-onnx = "local:D:/models/laya-onnx"
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 # laya-typed-decisions = "https://example.com/models/laya-typed-decisions/model.json"
+# The center's model.json schema and URL rules: docs/model-manifest.md
 # Candle families are detected from the checkpoint layout/config:
 # nli = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
 # nli-deberta = "hf:MoritzLaurer/deberta-v3-large-zeroshot-v2.0"

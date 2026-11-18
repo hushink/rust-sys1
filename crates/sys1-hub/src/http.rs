@@ -138,6 +138,31 @@ mod tests {
     use sys1_core::ModelFile;
 
     #[test]
+    fn an_omitted_url_falls_back_to_the_manifest_path() {
+        let mut manifest: ModelManifest = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "name": "m",
+                "description": "d",
+                "release_date": "2026-01-01",
+                "family": "laya",
+                "backend": "candle",
+                "format": "safetensors",
+                "version": "1",
+                "files": [{"path": "encoder/config.json", "size": 2}]
+            }"#,
+        )
+        .expect("manifest without url");
+        assert_eq!(manifest.files[0].url, "");
+        resolve_relative_urls("https://example.com/models/laya/model.json", &mut manifest)
+            .expect("relative URL resolves");
+        assert_eq!(
+            manifest.files[0].url,
+            "https://example.com/models/laya/encoder/config.json"
+        );
+    }
+
+    #[test]
     fn resolves_relative_file_urls() {
         let mut manifest = ModelManifest {
             schema_version: 1,

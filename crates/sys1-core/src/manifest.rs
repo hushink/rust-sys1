@@ -32,6 +32,9 @@ pub struct ModelManifest {
 pub struct ModelFile {
     /// Repository-relative, forward-slash path.
     pub path: String,
+    /// Absolute URL, a URL relative to the manifest, or empty to resolve
+    /// `path` against the manifest URL.
+    #[serde(default)]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,

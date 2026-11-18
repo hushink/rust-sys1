@@ -22,7 +22,8 @@ plus NLI, GLiClass, Qwen3Guard, Von, Decima, Kev, Decision 1.0 and Clef.
 - Laya in candle: ModernBERT encoder, decision head, calibration, batch, confidence modes.
 - Optional ONNX Runtime backend for Laya exports; CUDA / TensorRT / DirectML / CoreML execution providers via features.
 - Pure NumPy Laya-to-ONNX exporter with official golden logits within 2.5e-6.
-- Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center.
+- Model sources: local path, Hugging Face, ModelScope, static HTTP manifest center
+  ([manifest schema](docs/model-manifest.md)).
 - Content-addressed-ish cache: sha256, HTTP Range resume, offline mode, concurrent pull lock, byte quota with LRU eviction.
 - Single-process server: registry, lazy loading, LRU, keep_alive, `spawn_blocking` inference, gzip/zstd requests.
 - Runtime model management: load, unload, reload, and add/remove models without restarting.
