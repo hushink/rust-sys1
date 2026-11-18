@@ -5,7 +5,7 @@ use std::time::Duration;
 use sys1_core::{
     AnswerError, Answers, DecisionModel, DecisionOutput, DevicePreference, Error, ManifestError,
     ModelError, ModelFactory, ModelFile, ModelManifest, ModelOrigin, ModelRegistry, Questions,
-    RegistryConfig, ResolvedDevice,
+    RegistryConfig, ResolvedDevice, canonical_json,
 };
 use sys1_protocol::{
     Answer, AnswerType, ChoiceAnswer, NoulAnswer, Question, ScoreAnswer, State, Usage,
@@ -314,4 +314,60 @@ fn device_parse_and_resolve() {
         DevicePreference::Cpu.resolve(&available).unwrap(),
         ResolvedDevice::Cpu
     );
+}
+
+#[test]
+fn canonical_json_round_trips_random_values() {
+    use serde_json::{Map, Number, Value};
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            self.0
+        }
+
+        fn text(&mut self) -> String {
+            const CHARS: &[char] = &[
+                'a', 'Z', '0', ' ', '"', '\\', '\n', '\t', '\u{1}', 'é', '中', '😀', '/', ':',
+            ];
+            let len = (self.next() as usize) % 12;
+            (0..len)
+                .map(|_| CHARS[(self.next() as usize) % CHARS.len()])
+                .collect()
+        }
+
+        fn value(&mut self, depth: usize) -> Value {
+            match self.next() % if depth == 0 { 4 } else { 6 } {
+                0 => Value::Null,
+                1 => Value::Bool(self.next().is_multiple_of(2)),
+                2 => Value::Number(Number::from((self.next() % 2001) as i64 - 1000)),
+                3 => Value::String(self.text()),
+                4 => Value::Array(
+                    (0..(self.next() as usize % 5))
+                        .map(|_| self.value(depth - 1))
+                        .collect(),
+                ),
+                _ => {
+                    let mut map = Map::new();
+                    for _ in 0..(self.next() as usize % 5) {
+                        map.insert(self.text(), self.value(depth - 1));
+                    }
+                    Value::Object(map)
+                }
+            }
+        }
+    }
+
+    let mut rng = Rng(0xca11ab1e);
+    for _ in 0..500 {
+        let original = rng.value(3);
+        let text = canonical_json(&original);
+        let parsed: Value = serde_json::from_str(&text).expect("canonical JSON parses");
+        assert_eq!(parsed, original, "{text}");
+        assert_eq!(canonical_json(&parsed), text, "not idempotent");
+    }
 }
