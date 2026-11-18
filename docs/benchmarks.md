@@ -207,6 +207,16 @@ cargo test --release -p sys1-clef --test clef matches_the_recorded_triage_decisi
 - 这次验证还暴露并修复了两个真实 checkpoint 才会触发的问题：head 中
   4096 维向量的 Linear 需要先升到二维，`residual_gate` 需要以 0 维张量
   做 sigmoid。
+- **logits 级对齐**：以作者仓库中的 `joint_schema_model.py`（BF16，CPU）
+  为参考，Rust 的输入 token 行与上游 `encode_record` 完全一致（team 单问
+  为 179 个 token）。概率最大偏差 ≤0.033（BF16 在 candle 与 PyTorch 间的
+  累加顺序差异），argmax 全部一致：team billing 0.9565 → 0.9874，triage
+  refund 0.7873 → 0.7994，upset 第 4 档 0.7144 → 0.6867。复现：
+
+  ```bash
+  cargo test --release -p sys1-clef --test clef matches_upstream_bf16_probabilities \
+    -- --ignored --nocapture --test-threads=1
+  ```
 
 GPU 上需要至少 24 GB 显存（BF16 权重约 18 GB，4096-token 请求峰值约
 22.8 GB）；RTX 3060 12 GB 不适用。
