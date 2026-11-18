@@ -206,8 +206,9 @@ auto-loaded `sys1.toml`). It applies **only** `[models]` additions/removals:
 
 - Added models are resolved through the hub and registered as `configured`.
 - Removed models are unloaded from the catalog (the disk cache is left alone).
-- Changing `[hub]`, `[server]`, or an existing model's reference returns
-  `409 restart required`; invalid TOML or model resolution failure returns
+- Changing `[hub]`, `[server]`, an existing model's reference, or a per-model
+  `families` block returns `409 restart required`; invalid TOML or model
+  resolution failure returns
   `400`. Neither mutates the catalog.
 - The endpoint exists only when admin endpoints are enabled and a config file
   was loaded at startup.
@@ -241,11 +242,21 @@ log_format = "text"          # text | json
 [models]
 laya-latest = "local:D:/models/laya"
 laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+
+# Table form: per-model family overrides, merged onto [families].
+[models.nli-small]
+reference = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+[models.nli-small.families]
+max_batch = 8
+[models.nli-small.families.decima]
+choice_fit = false
 ```
 
 See [`sys1.toml.example`](../../sys1.toml.example). Relative local paths resolve
 from the config file's directory. `[models]` names also work with `pull`,
-`show`, `rm`, and `run`.
+`show`, `rm`, and `run`. Omitted per-model keys inherit the global `[families]`
+values; `sys1 run` and `serve --model` use the same overrides when the requested
+name matches a `[models]` key.
 
 ## Logging and tracing
 

@@ -1,3 +1,4 @@
+use crate::config::ModelEntry;
 use crate::{pull_base, pull_model};
 use indexmap::IndexMap;
 use std::sync::{Arc, RwLock};
@@ -15,9 +16,10 @@ pub struct HubModelResolver {
     factory: Arc<FamilyFactory>,
     options: LayaOptions,
     families: FamilyOptions,
-    /// `[models]` aliases from `sys1.toml`, so the admin API can accept the
-    /// same names as the CLI. Replaced atomically on config reload.
-    references: RwLock<IndexMap<String, String>>,
+    /// `[models]` entries from `sys1.toml`, so the admin API can accept the
+    /// same aliases and per-model family overrides as the CLI. Replaced
+    /// atomically on config reload.
+    models: RwLock<IndexMap<String, ModelEntry>>,
 }
 
 impl HubModelResolver {
@@ -26,22 +28,22 @@ impl HubModelResolver {
         factory: Arc<FamilyFactory>,
         options: LayaOptions,
         families: FamilyOptions,
-        references: IndexMap<String, String>,
+        models: IndexMap<String, ModelEntry>,
     ) -> Self {
         Self {
             hub,
             factory,
             options,
             families,
-            references: RwLock::new(references),
+            models: RwLock::new(models),
         }
     }
 
-    pub fn replace_references(&self, references: IndexMap<String, String>) {
+    pub fn replace_models(&self, models: IndexMap<String, ModelEntry>) {
         *self
-            .references
+            .models
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = references;
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = models;
     }
 
     fn resolve_named(
@@ -49,22 +51,27 @@ impl HubModelResolver {
         reference: &str,
         name: Option<&str>,
     ) -> Result<Vec<ModelManifest>, ModelError> {
-        let reference = self
-            .references
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(reference)
-            .cloned()
-            .unwrap_or_else(|| reference.to_owned());
+        let entry = {
+            let models = self
+                .models
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            name.and_then(|name| models.get(name))
+                .or_else(|| models.get(reference))
+                .cloned()
+        };
+        let (reference, families) = match entry {
+            Some(entry) => (entry.reference().to_owned(), entry.families(&self.families)),
+            None => (reference.to_owned(), self.families.clone()),
+        };
         let pulled = pull_model(self.hub.as_ref(), &reference).map_err(|error| {
             ModelError::load(format!("cannot resolve `{reference}`: {error:#}"))
         })?;
-        let overrides =
-            resolve_bundle_overrides(&pulled.directory, &self.families, |base_reference| {
-                pull_base(self.hub.as_ref(), base_reference)
-            })?;
+        let overrides = resolve_bundle_overrides(&pulled.directory, &families, |base_reference| {
+            pull_base(self.hub.as_ref(), base_reference)
+        })?;
         let bundle = BundleOptions {
-            families: self.families.clone(),
+            families,
             overrides,
         };
         register_bundle(
@@ -136,7 +143,7 @@ mod tests {
         let mut references = IndexMap::new();
         references.insert(
             "configured".to_owned(),
-            format!("local:{}", directory.display()),
+            ModelEntry::Reference(format!("local:{}", directory.display())),
         );
         let resolver = HubModelResolver::new(
             hub,
@@ -157,7 +164,7 @@ mod tests {
             .expect("resolve with name override");
         assert_eq!(manifests[0].name, "custom-name");
         assert!(resolver.release("custom-name"));
-        resolver.replace_references(IndexMap::new());
+        resolver.replace_models(IndexMap::new());
 
         fs::remove_dir_all(root).expect("cleanup");
     }

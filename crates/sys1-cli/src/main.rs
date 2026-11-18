@@ -402,7 +402,7 @@ fn serve_command(
     };
     let families = config.value.families.to_options();
     let hub = Arc::new(make_hub(cache, offline, max_cache_bytes, config)?);
-    let (manifests, factory) = build_models(&hub, &specs, options.clone(), &families)?;
+    let (manifests, factory) = build_models(&hub, &specs, options.clone(), &families, config)?;
     if manifests.is_empty() {
         if !enable_admin {
             bail!(
@@ -576,6 +576,7 @@ fn run_command(
     let reference = config.model_reference(&args.reference);
     let pulled = pull_model(&hub, &reference)?;
     let families = config.value.families.to_options();
+    let families = config.families_for(&args.reference, &families);
     let bundle = bundle_for_directory(&hub, &pulled.directory, &families)?;
     let input = read_input(&args.input)?;
     let value: serde_json::Value =
@@ -940,6 +941,7 @@ fn build_models(
     specs: &[String],
     options: ModelOptions,
     families: &FamilyOptions,
+    config: &LoadedConfig,
 ) -> anyhow::Result<(Vec<ModelManifest>, Arc<FamilyFactory>)> {
     let factory = Arc::new(FamilyFactory::new());
     let mut manifests = Vec::new();
@@ -950,7 +952,8 @@ fn build_models(
             if !is_supported_directory(&pulled.directory) {
                 continue;
             }
-            let bundle = match bundle_for_directory(hub, &pulled.directory, families) {
+            let model_families = config.families_for(&pulled.manifest.name, families);
+            let bundle = match bundle_for_directory(hub, &pulled.directory, &model_families) {
                 Ok(bundle) => bundle,
                 Err(error) => {
                     tracing::warn!(
@@ -988,7 +991,8 @@ fn build_models(
                 "laya-latest has no multilingual/typed-decisions subdirectories; serving one checkpoint"
             );
         }
-        let bundle = bundle_for_directory(hub, &pulled.directory, families)?;
+        let model_families = config.families_for(&name, families);
+        let bundle = bundle_for_directory(hub, &pulled.directory, &model_families)?;
         let registered = register_bundle(
             &factory,
             &pulled.manifest,

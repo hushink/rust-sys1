@@ -125,7 +125,7 @@ impl ConfigReloader for HubConfigReloader {
                 .models
                 .get(name)
                 .expect("added name came from the new model map");
-            let manifests = match self.resolver.resolve_as(name, reference) {
+            let manifests = match self.resolver.resolve_as(name, reference.reference()) {
                 Ok(manifests) => manifests,
                 Err(error) => {
                     self.rollback(&registered, &resolved, &pre_existing);
@@ -149,7 +149,7 @@ impl ConfigReloader for HubConfigReloader {
             }
         }
 
-        self.resolver.replace_references(new.models.clone());
+        self.resolver.replace_models(new.models.clone());
         *self
             .config
             .lock()
@@ -309,6 +309,48 @@ mod tests {
                 .iter()
                 .any(|file| file.path == "model.safetensors")
         );
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn per_model_family_changes_require_restart() {
+        let (root, _registry, _resolver, reloader) = setup("model-families");
+        let reference = root
+            .join("checkpoint")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let path = root.join("sys1.toml");
+        let write = |batch: u32| {
+            fs::write(
+                &path,
+                format!(
+                    "[hub]\ncache_dir = \"cache\"\n\n[server]\ndevice = \"cpu\"\n\n\
+                     [models.laya]\nreference = \"local:{reference}\"\n\
+                     [models.laya.families]\nmax_batch = {batch}\n"
+                ),
+            )
+            .expect("config");
+        };
+
+        write(4);
+        let report = reloader.reload().expect("add model with overrides");
+        assert_eq!(report.added, vec!["laya".to_owned()]);
+
+        write(8);
+        let error = reloader.reload().expect_err("override change");
+        match error {
+            ReloadError::RestartRequired(changes) => {
+                assert!(
+                    changes
+                        .iter()
+                        .any(|change| change.contains("model references")),
+                    "{changes:?}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
 
         fs::remove_dir_all(root).expect("cleanup");
     }

@@ -105,3 +105,18 @@ laya-latest = "local:D:/models/laya"
 # Kev pulls the Qwen3.5 base declared by the adapter when it is not present
 # beside the adapter or under base/:
 # kev = "hf:jaredpalmer/kev-0.8b"
+
+# A model may override any [families] setting for itself. Omitted keys inherit
+# the global values above. Changing a model's settings requires a restart;
+# adding or removing a [models] entry is picked up by /api/config/reload.
+# [models.nli-small]
+# reference = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+# [models.nli-small.families]
+# max_batch = 8
+# [models.nli-small.families.decima]
+# choice_fit = false
+
+# [models.kev-small]
+# reference = "hf:jaredpalmer/kev-0.8b"
+# [models.kev-small.families.kev]
+# base_dir = "D:/models/qwen3.5-0.8b-base"

@@ -191,8 +191,8 @@ CORS 默认 permissive；用 `--cors-origin`（可重复）、`--no-cors` 或
 
 - 新增模型经 hub 解析并注册为 `configured`。
 - 移除模型从运行时目录卸载（磁盘缓存保留）。
-- 修改 `[hub]`、`[server]` 或已有模型的引用返回 `409 restart required`；
-  TOML 或模型解析失败返回 `400`。两种情况都不修改目录。
+- 修改 `[hub]`、`[server]`、已有模型的引用或其 `families` 块返回
+  `409 restart required`；TOML 或模型解析失败返回 `400`。两种情况都不修改目录。
 - 仅当 admin 开启且启动时加载了配置文件时，该端点才存在。
 
 ## 配置
@@ -223,10 +223,20 @@ log_format = "text"          # text | json
 [models]
 laya-latest = "local:D:/models/laya"
 laya-multilingual = "hf:convaiinnovations/laya-multilingual"
+
+# 表形式：按模型覆盖 family 设置，合并到全局 [families] 之上。
+[models.nli-small]
+reference = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+[models.nli-small.families]
+max_batch = 8
+[models.nli-small.families.decima]
+choice_fit = false
 ```
 
 完整示例见 [`sys1.toml.example`](../../sys1.toml.example)。相对 local 路径按
 配置文件所在目录解析；`[models]` 中的名称也可用于 `pull`、`show`、`rm`、`run`。
+未写的按模型字段继承全局 `[families]`；当 `sys1 run` 或 `serve --model` 的名称
+命中 `[models]` 键时，同样应用这些覆盖。
 
 ## 日志与追踪
 

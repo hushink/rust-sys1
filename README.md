@@ -308,12 +308,19 @@ cache_dir = "D:/models/sys1-cache"  # model download/cache directory
 laya-latest = "local:D:/models/laya"       # local model directory
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 # kev = "hf:jaredpalmer/kev-0.8b"          # pulls the declared Qwen3.5 base too
+
+# Per-model family overrides (omitted keys inherit [families]):
+# [models.nli-small]
+# reference = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+# [models.nli-small.families]
+# max_batch = 8
 ```
 
 Relative paths in the file resolve from the config file's directory.
 `[models]` names are usable by `serve`, `run`, `pull`, `show`, and `rm`.
-`/api/config/reload` applies `[models]` changes only; `[families]` changes need
-a restart. `sys1 rm` on a Kev adapter prints the declared base and leaves it
+`/api/config/reload` applies `[models]` additions/removals only; family changes,
+including per-model `families` blocks, need a restart. `sys1 rm` on a Kev adapter
+prints the declared base and leaves it
 cached (remove it with its own `sys1 rm`).
 Kev adapters resolve their Qwen3.5 base from `base_dir`, a `base/` sibling, or
 the repository recorded in `head.pt` / `adapter_config.json`; an `hf:` adapter

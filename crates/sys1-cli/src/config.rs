@@ -22,8 +22,82 @@ pub struct FileConfig {
     #[serde(default)]
     pub families: FamiliesSection,
     /// `name = "local:/path"`, `hf:owner/repo`, or any supported `ModelRef`.
+    /// A table form adds per-model family overrides:
+    ///
+    /// ```toml
+    /// [models.nli-small]
+    /// reference = "hf:owner/nli"
+    /// [models.nli-small.families]
+    /// max_batch = 8
+    /// ```
     #[serde(default)]
-    pub models: IndexMap<String, String>,
+    pub models: IndexMap<String, ModelEntry>,
+}
+
+/// A `[models]` entry: either a bare reference string or a table with
+/// per-model settings.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ModelEntry {
+    Reference(String),
+    Detailed(ModelDetail),
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelDetail {
+    pub reference: String,
+    #[serde(default)]
+    pub families: FamiliesSection,
+}
+
+impl ModelEntry {
+    pub fn reference(&self) -> &str {
+        match self {
+            Self::Reference(reference) => reference,
+            Self::Detailed(detail) => &detail.reference,
+        }
+    }
+
+    /// Merge this entry's overrides onto the global family options.
+    pub fn families(&self, global: &FamilyOptions) -> FamilyOptions {
+        match self {
+            Self::Reference(_) => global.clone(),
+            Self::Detailed(detail) => merge_families(global, &detail.families),
+        }
+    }
+}
+
+fn merge_families(global: &FamilyOptions, overrides: &FamiliesSection) -> FamilyOptions {
+    let overrides = overrides.to_options();
+    FamilyOptions {
+        max_batch: overrides.max_batch.or(global.max_batch),
+        qwen3guard: MaxLenOptions {
+            max_len: overrides.qwen3guard.max_len.or(global.qwen3guard.max_len),
+        },
+        von: MaxLenOptions {
+            max_len: overrides.von.max_len.or(global.von.max_len),
+        },
+        clef: MaxLenOptions {
+            max_len: overrides.clef.max_len.or(global.clef.max_len),
+        },
+        decima: DecimaFamilyOptions {
+            choice_fit: overrides.decima.choice_fit.or(global.decima.choice_fit),
+        },
+        kev: KevFamilyOptions {
+            base_dir: overrides
+                .kev
+                .base_dir
+                .or_else(|| global.kev.base_dir.clone()),
+            temperature: overrides.kev.temperature.or(global.kev.temperature),
+        },
+        decision: DecisionFamilyOptions {
+            temperature: overrides
+                .decision
+                .temperature
+                .or(global.decision.temperature),
+        },
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -170,7 +244,7 @@ impl LoadedConfig {
         self.value
             .models
             .iter()
-            .map(|(name, reference)| format!("{name}={reference}"))
+            .map(|(name, entry)| format!("{name}={}", entry.reference()))
             .collect()
     }
 
@@ -179,8 +253,17 @@ impl LoadedConfig {
         self.value
             .models
             .get(reference)
-            .cloned()
+            .map(|entry| entry.reference().to_owned())
             .unwrap_or_else(|| reference.to_owned())
+    }
+
+    /// Global family options with the entry's per-model overrides applied.
+    pub fn families_for(&self, name: &str, global: &FamilyOptions) -> FamilyOptions {
+        self.value
+            .models
+            .get(name)
+            .map(|entry| entry.families(global))
+            .unwrap_or_else(|| global.clone())
     }
 }
 
@@ -226,8 +309,18 @@ pub fn load(explicit: Option<&Path>) -> anyhow::Result<LoadedConfig> {
     if let Some(base) = value.families.kev.base_dir.take() {
         value.families.kev.base_dir = Some(resolve_path(&base_dir, &base));
     }
-    for reference in value.models.values_mut() {
-        *reference = resolve_reference(&base_dir, reference);
+    for entry in value.models.values_mut() {
+        match entry {
+            ModelEntry::Reference(reference) => {
+                *reference = resolve_reference(&base_dir, reference);
+            }
+            ModelEntry::Detailed(detail) => {
+                detail.reference = resolve_reference(&base_dir, &detail.reference);
+                if let Some(base) = detail.families.kev.base_dir.take() {
+                    detail.families.kev.base_dir = Some(resolve_path(&base_dir, &base));
+                }
+            }
+        }
     }
 
     Ok(LoadedConfig {
@@ -337,6 +430,13 @@ mod tests {
 
             [models]
             laya-latest = "local:D:/models/laya"
+
+            [models.nli-small]
+            reference = "hf:owner/nli"
+            [models.nli-small.families]
+            max_batch = 8
+            [models.nli-small.families.decima]
+            choice_fit = false
         "#;
         let config: FileConfig = toml::from_str(text).expect("config");
         assert_eq!(config.hub.max_cache_bytes, Some(34_359_738_368));
@@ -362,8 +462,18 @@ mod tests {
             Some(&["https://app.example".to_owned()][..])
         );
         assert_eq!(
-            config.models.get("laya-latest").map(String::as_str),
+            config
+                .models
+                .get("laya-latest")
+                .map(|entry| entry.reference()),
             Some("local:D:/models/laya")
+        );
+        assert_eq!(
+            config
+                .models
+                .get("nli-small")
+                .map(|entry| entry.reference()),
+            Some("hf:owner/nli")
         );
 
         let families = config.families.to_options();
@@ -378,6 +488,13 @@ mod tests {
         );
         assert_eq!(families.kev.temperature, Some(2.351));
         assert_eq!(families.decision.temperature, Some(1.0));
+
+        let merged = config.models["nli-small"].families(&families);
+        assert_eq!(merged.max_batch, Some(8));
+        assert_eq!(merged.decima.choice_fit, Some(false));
+        assert_eq!(merged.qwen3guard.max_len, Some(32_768));
+        assert_eq!(merged.kev.temperature, Some(2.351));
+        assert_eq!(merged.decision.temperature, Some(1.0));
     }
 
     #[test]

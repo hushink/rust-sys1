@@ -188,9 +188,9 @@ manifest。当前常驻的模型返回 `409`，需要先 unload。
 curl -X POST http://127.0.0.1:8080/api/config/reload
 ```
 
-只应用 `[models]` 变更。`[hub]`/`[server]` 设置或已有模型引用变化返回
-`409 restart required`；TOML 无效或模型解析失败返回 `400`。两种情况都不修改
-目录；由配置新增的模型标记为 `origin: "configured"`。
+只应用 `[models]` 的增删。`[hub]`/`[server]` 设置、已有模型引用或其
+`families` 覆盖变化返回 `409 restart required`；TOML 无效或模型解析失败返回
+`400`。两种情况都不修改目录；由配置新增的模型标记为 `origin: "configured"`。
 
 ### 指标与预加载
 
@@ -287,11 +287,18 @@ cache_dir = "D:/models/sys1-cache"  # 模型下载/缓存目录
 laya-latest = "local:D:/models/laya"       # 本地模型目录
 # laya-multilingual = "hf:convaiinnovations/laya-multilingual"
 # kev = "hf:jaredpalmer/kev-0.8b"          # 同时拉取声明的 Qwen3.5 base
+
+# 按模型覆盖 family 设置（未写的键继承 [families]）：
+# [models.nli-small]
+# reference = "hf:MoritzLaurer/ModernBERT-base-zeroshot-v2.0"
+# [models.nli-small.families]
+# max_batch = 8
 ```
 
 配置文件中的相对路径按配置文件所在目录解析。`[models]` 中的名称可用于
 `serve`、`run`、`pull`、`show`、`rm`。`/api/config/reload` 只应用 `[models]`
-变更，`[families]` 变更需要重启。对 Kev adapter 执行 `sys1 rm` 时会打印其
+的增删；family 设置（包括按模型的 `families` 块）变更需要重启。对 Kev
+adapter 执行 `sys1 rm` 时会打印其
 声明的 base，并保留该 base（用单独的 `sys1 rm` 删除）。Kev 会从 `base_dir`、相邻的 `base/`
 目录，或 `head.pt` / `adapter_config.json` 中记录的仓库解析 Qwen3.5 base；因此
 `hf:` 适配器会在首次使用时自动拉取 base。凭据建议通过 `HF_TOKEN`、
